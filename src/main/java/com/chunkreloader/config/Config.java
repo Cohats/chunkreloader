@@ -92,6 +92,40 @@ public class Config {
         staleDays.set(worldName + ":" + days);
     }
 
+    private static final java.util.Set<String> DIM_PATHS = java.util.Set.of("overworld", "the_nether", "the_end");
+
+    /**
+     * 获取 config 字符串中存储的世界名（冒号前的部分），如果没有则为 null
+     */
+    private String getStoredWorld(String raw) {
+        if (raw == null || raw.isEmpty()) return null;
+        int colon = raw.indexOf(':');
+        if (colon < 0) return null;
+        String world = raw.substring(0, colon).trim();
+        return DIM_PATHS.contains(world) ? world : null;
+    }
+
+    /**
+     * 获取 config 字符串中存储的值
+     */
+    public String getDisplayValue(String raw) {
+        if (raw == null || raw.isEmpty()) return "(default)";
+        int colon = raw.indexOf(':');
+        if (colon < 0) return raw.trim();
+        return raw.substring(colon + 1).trim();
+    }
+
+    /**
+     * 检查指定世界名是否匹配 config 中存储的世界
+     */
+    public boolean matchesStoredWorld(String raw, String worldName) {
+        if (raw == null || raw.isEmpty()) return false;
+        int colon = raw.indexOf(':');
+        if (colon < 0) return true; // 无前缀，应用于所有世界
+        String stored = raw.substring(0, colon).trim();
+        return stored.equals(worldName) || stored.equals("minecraft:" + worldName);
+    }
+
     /**
      * 解析 "world:value" 或 "value" 格式为 boolean
      */

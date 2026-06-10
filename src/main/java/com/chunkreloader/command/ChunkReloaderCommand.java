@@ -32,7 +32,14 @@ public class ChunkReloaderCommand {
         );
 
         // --- reload subcommand ---
-        var reloadWorldArg = Commands.argument("world", StringArgumentType.word());
+        var reloadWorldArg = Commands.argument("world", StringArgumentType.word())
+                .suggests((ctx, builder) -> {
+                    var server = ctx.getSource().getServer();
+                    for (var key : server.levelKeys()) {
+                        builder.suggest(key.location().getPath());
+                    }
+                    return builder.buildFuture();
+                });
 
         // reload <world> all [force]
         reloadWorldArg.then(Commands.literal("all")
@@ -391,12 +398,35 @@ public class ChunkReloaderCommand {
 
     private static int showStatus(CommandSourceStack source) {
         var config = Config.getInstance();
+        var server = source.getServer();
 
         source.sendSuccess(() -> Component.literal("§6=== ChunkReloader Status ==="), false);
-        source.sendSuccess(() -> Component.literal("§eAuto Reload: §f" + config.enableAutoReload.get()), false);
-        source.sendSuccess(() -> Component.literal("§eStale Days: §f" + config.staleDays.get()), false);
-        source.sendSuccess(() -> Component.literal("§eNon-Record Area: §f" + config.nonRecordArea.get()), false);
-        source.sendSuccess(() -> Component.literal("§eProtect Area: §f" + (config.protectArea.get().isEmpty() ? "(none)" : config.protectArea.get())), false);
+
+        // Per-world settings
+        for (var key : server.levelKeys()) {
+            String name = key.location().getPath();
+            var level = server.getLevel(key);
+            if (level == null) continue;
+
+            boolean autoReload = config.getAutoReload(level);
+            int staleDays = config.getStaleDays(level);
+            String nonRecord = config.nonRecordArea.get();
+            String protect = config.protectArea.get();
+
+            String autoStr = autoReload ? "§atrue" : "§cfalse";
+            source.sendSuccess(() -> Component.literal(
+                    "§b" + name + "§r:"), false);
+            source.sendSuccess(() -> Component.literal(
+                    "  §eAuto Reload: §f" + autoStr), false);
+            source.sendSuccess(() -> Component.literal(
+                    "  §eStale Days: §f" + staleDays + "d"), false);
+            source.sendSuccess(() -> Component.literal(
+                    "  §eNon-Record Area: §f" + (config.matchesStoredWorld(nonRecord, name) ? config.getDisplayValue(nonRecord) : "(default)")), false);
+            source.sendSuccess(() -> Component.literal(
+                    "  §eProtect Area: §f" + (protect.isEmpty() ? "(none)" :
+                            config.matchesStoredWorld(protect, name) ? config.getDisplayValue(protect) : "(default)")), false);
+        }
+
         source.sendSuccess(() -> Component.literal("§eCheck Interval: §f" + config.autoReloadInterval.get() + "s"), false);
 
         // Show reload queue progress if active
