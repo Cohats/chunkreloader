@@ -43,13 +43,13 @@
 
 游戏内直接修改配置，立即生效。
 
-| 选项 | 值类型 | 说明 |
-|------|--------|------|
-| `enableAutoReload` | `true` / `false` | 开关自动重载 |
-| `staleDays` | 数字 | 区块过期天数 |
-| `nonRecordArea` | `x1,z1,x2,z2` | 非记录区域（方块坐标） |
-| `protectArea` | `x1,z1,x2,z2` | 保护区域（方块坐标），留空表示不使用 |
-| `autoReloadInterval` | 数字 | 自动重载检查间隔（秒） |
+| 选项 | 值类型 | 默认值 | 说明 |
+|------|--------|--------|------|
+| `enableAutoReload` | `true` / `false` | `false` | 开关自动重载 |
+| `staleDays` | 数字 | `30` | 区块过期天数 |
+| `nonRecordArea` | `x1,z1,x2,z2` | `-50000,-50000,50000,50000` | 非记录区域（方块坐标） |
+| `protectArea` | `x1,z1,x2,z2` | `""` (空=不启用) | 保护区域（方块坐标） |
+| `autoReloadInterval` | 数字 | `300` | 自动重载检查间隔（秒） |
 
 **示例**:
 ```
