@@ -102,6 +102,21 @@ public class ChunkReloaderCommand {
                 )
         );
 
+        // --- first subcommand: factory reset — delete ALL unprotected chunks ---
+        var firstWorldArg = Commands.argument("world", StringArgumentType.word())
+                .suggests((ctx, builder) -> {
+                    var server = ctx.getSource().getServer();
+                    for (var key : server.levelKeys()) {
+                        builder.suggest(key.location().getPath());
+                    }
+                    return builder.buildFuture();
+                });
+        firstWorldArg.executes(ctx -> first(
+                ctx.getSource(),
+                StringArgumentType.getString(ctx, "world")
+        ));
+        root.then(Commands.literal("first").then(firstWorldArg));
+
         // --- status subcommand ---
         root.then(Commands.literal("status")
                 .executes(ctx -> showStatus(ctx.getSource()))
@@ -392,6 +407,168 @@ public class ChunkReloaderCommand {
         } catch (Exception e) {
             ChunkReloaderMod.LOGGER.warn("Failed to save config: {}", e.getMessage());
         }
+    }
+
+    // ---- first <world>: factory reset — delete ALL unprotected chunks ----
+
+    private static int first(CommandSourceStack source, String worldName) {
+        if (ReloadQueue.isActive()) {
+            source.sendFailure(Component.literal("§cA reload is already in progress. Wait for it to complete."));
+            return 0;
+        }
+
+        var server = source.getServer();
+        ServerLevel level = AreaParser.getWorldByName(server, worldName);
+        if (level == null) {
+            source.sendFailure(Component.literal("§cWrong world name: " + worldName + ". Use /chunckreloader get worldName to list valid worlds."));
+            return 0;
+        }
+
+        source.sendSuccess(() -> Component.literal("§e[ChunkReloader] Scanning region files for world §b" + worldName + "§e..."), false);
+
+        // Scan ALL existing chunks from region files
+        List<ChunkPos> allChunks;
+        try {
+            allChunks = scanRegionFiles(level);
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("§cError scanning region files: " + e.getMessage()));
+            return 0;
+        }
+
+        if (allChunks.isEmpty()) {
+            source.sendSuccess(() -> Component.literal("§e[ChunkReloader] No chunks found in world §b" + worldName), false);
+            return 1;
+        }
+
+        source.sendSuccess(() -> Component.literal("§e[ChunkReloader] Found §6" + allChunks.size() + "§e chunks total. Filtering protected areas..."), false);
+
+        // Filter out protected chunks
+        Config config = Config.getInstance();
+        String protectStr = config.protectArea.get();
+        List<ChunkPos> toDelete = new ArrayList<>();
+        for (ChunkPos pos : allChunks) {
+            if (ProtectedChunkManager.isProtected(level, pos)) continue;
+            toDelete.add(pos);
+        }
+
+        source.sendSuccess(() -> Component.literal("§e[ChunkReloader] Queuing §c" + toDelete.size() + "§e unprotected chunks for deletion..."), false);
+
+        if (toDelete.isEmpty()) {
+            source.sendSuccess(() -> Component.literal("§a[ChunkReloader] All chunks are protected. Nothing to delete."), false);
+            return 1;
+        }
+
+        boolean started = ReloadQueue.startBatch(level, toDelete, true);
+        if (!started) {
+            source.sendFailure(Component.literal("§cFailed to start. Another reload may be in progress."));
+            return 0;
+        }
+
+        return 1;
+    }
+
+    /**
+     * Scan all region files in the world's region directory and return all existing chunk positions.
+     */
+    private static List<ChunkPos> scanRegionFiles(ServerLevel level) {
+        List<ChunkPos> result = new ArrayList<>();
+        java.nio.file.Path regionDir = findRegionDir(level);
+        if (regionDir == null || !java.nio.file.Files.isDirectory(regionDir)) {
+            return result;
+        }
+
+        try (var files = java.nio.file.Files.list(regionDir)) {
+            files.filter(p -> p.getFileName().toString().matches("r\\.-?\\d+\\.-?\\d+\\.mca"))
+                    .forEach(regionFile -> {
+                        String name = regionFile.getFileName().toString();
+                        String[] parts = name.replace("r.", "").replace(".mca", "").split("\\.");
+                        int regionX = Integer.parseInt(parts[0]);
+                        int regionZ = Integer.parseInt(parts[1]);
+
+                        try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(regionFile.toFile(), "r")) {
+                            byte[] header = new byte[4096]; // 1024 entries * 4 bytes
+                            file.readFully(header);
+
+                            for (int i = 0; i < 1024; i++) {
+                                int off = i * 4;
+                                int offset = ((header[off] & 0xFF) << 16)
+                                           | ((header[off + 1] & 0xFF) << 8)
+                                           | (header[off + 2] & 0xFF);
+                                if (offset == 0) continue; // No chunk here
+
+                                int localX = i & 31;
+                                int localZ = i >> 5;
+                                int chunkX = regionX * 32 + localX;
+                                int chunkZ = regionZ * 32 + localZ;
+                                result.add(new ChunkPos(chunkX, chunkZ));
+                            }
+                        } catch (Exception e) {
+                            ChunkReloaderMod.LOGGER.warn("Failed to read region file {}: {}", regionFile, e.getMessage());
+                        }
+                    });
+        } catch (Exception e) {
+            ChunkReloaderMod.LOGGER.warn("Failed to list region files: {}", e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * Find the region directory for a world.
+     */
+    private static java.nio.file.Path findRegionDir(ServerLevel level) {
+        try {
+            var server = level.getServer();
+            var worldDir = server.getFile(".");
+
+            // Try getWorldPath API
+            try {
+                var lrClass = Class.forName("net.minecraft.world.level.storage.LevelResource");
+                var root = lrClass.getField("LEVEL_ROOT").get(null);
+                var getPath = server.getClass().getMethod("getWorldPath", lrClass);
+                java.nio.file.Path wp = (java.nio.file.Path) getPath.invoke(server, root);
+
+                var dimPath = level.dimension().location().getPath();
+                java.nio.file.Path dir = switch (dimPath) {
+                    case "overworld" -> wp.resolve("region");
+                    case "the_nether" -> wp.resolve("DIM-1").resolve("region");
+                    case "the_end" -> wp.resolve("DIM1").resolve("region");
+                    default -> wp.resolve(dimPath).resolve("region");
+                };
+                if (java.nio.file.Files.isDirectory(dir)) return dir;
+            } catch (Exception ignored) {}
+
+            // Fallback: check saves directory and common patterns
+            var dimFolder = switch (level.dimension().location().getPath()) {
+                case "overworld" -> "";
+                case "the_nether" -> "DIM-1";
+                case "the_end" -> "DIM1";
+                default -> level.dimension().location().getPath();
+            };
+
+            java.nio.file.Path savesDir = worldDir.resolve("saves");
+            if (java.nio.file.Files.isDirectory(savesDir)) {
+                try (var ds = java.nio.file.Files.list(savesDir)) {
+                    var it = ds.filter(java.nio.file.Files::isDirectory).iterator();
+                    if (it.hasNext()) {
+                        var saveDir = it.next();
+                        java.nio.file.Path dir = dimFolder.isEmpty()
+                                ? saveDir.resolve("region")
+                                : saveDir.resolve(dimFolder).resolve("region");
+                        if (java.nio.file.Files.isDirectory(dir)) return dir;
+                    }
+                }
+            }
+
+            java.nio.file.Path dir = dimFolder.isEmpty()
+                    ? worldDir.resolve("region")
+                    : worldDir.resolve(dimFolder).resolve("region");
+            if (java.nio.file.Files.isDirectory(dir)) return dir;
+        } catch (Exception e) {
+            ChunkReloaderMod.LOGGER.warn("Error finding region dir: {}", e.getMessage());
+        }
+
+        return null;
     }
 
     // ---- status ----
