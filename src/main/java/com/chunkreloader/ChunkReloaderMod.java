@@ -1,6 +1,6 @@
 package com.chunkreloader;
 
-import com.chunkreloader.command.ReloadAreaCommand;
+import com.chunkreloader.command.ChunkReloaderCommand;
 import com.chunkreloader.config.Config;
 import com.chunkreloader.handler.ChunkLoadHandler;
 import com.chunkreloader.manager.ChunkLoadTracker;
@@ -49,7 +49,7 @@ public class ChunkReloaderMod {
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {
-        ReloadAreaCommand.register(event.getDispatcher());
+        ChunkReloaderCommand.register(event.getDispatcher());
     }
 
     private void onChunkLoad(ChunkEvent.Load event) {
