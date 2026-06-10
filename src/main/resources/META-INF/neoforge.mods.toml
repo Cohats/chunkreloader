@@ -1,0 +1,34 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+issueTrackerURL=""
+
+[[mods]]
+modId="chunkreloader"
+version="1.0.0"
+displayName="ChunkReloader"
+logoFile="chunkreloader.png"
+credits=""
+authors=""
+description='''
+A mod that allows reloading (regenerating) chunks and auto-managing stale chunks.
+Features:
+- /reload_area command to regenerate chunks in a specified area (OP required on server)
+- Auto-track and regenerate chunks not loaded for a configurable number of days
+- Respects GriefDefender protected claims
+- Configurable non-record area
+'''
+
+[[dependencies.chunkreloader]]
+    modId="neoforge"
+    mandatory=true
+    versionRange="[21.1,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.chunkreloader]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.21.1,1.21.2)"
+    ordering="NONE"
+    side="BOTH"

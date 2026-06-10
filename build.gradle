@@ -1,0 +1,54 @@
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev' version '1.0.24'
+}
+
+group = 'com.chunkreloader'
+version = '1.0.0'
+
+base {
+    archivesName = 'chunkreloader'
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+neoForge {
+    version = "21.1.233"
+
+    validateAccessTransformers = true
+
+    runs {
+        client {
+            client()
+        }
+        server {
+            server()
+        }
+    }
+
+    mods {
+        chunkreloader {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+tasks.named('jar', Jar).configure {
+    manifest {
+        attributes([
+                "Specification-Title"     : "chunkreloader",
+                "Specification-Vendor"    : "chunkreloader",
+                "Specification-Version"   : "1",
+                "Implementation-Title"    : project.name,
+                "Implementation-Version"  : project.jar.archiveVersion,
+                "Implementation-Vendor"   : "chunkreloader",
+                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+        ])
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
