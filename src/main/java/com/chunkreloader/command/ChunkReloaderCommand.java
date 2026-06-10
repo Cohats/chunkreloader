@@ -2,8 +2,10 @@ package com.chunkreloader.command;
 
 import com.chunkreloader.ChunkReloaderMod;
 import com.chunkreloader.config.Config;
+import com.chunkreloader.manager.ChunkLoadTracker;
+import com.chunkreloader.manager.ProtectedChunkManager;
+import com.chunkreloader.manager.ReloadQueue;
 import com.chunkreloader.util.AreaParser;
-import com.chunkreloader.util.ChunkRegenerator;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -12,6 +14,9 @@ import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class ChunkReloaderCommand {
 
@@ -27,38 +32,55 @@ public class ChunkReloaderCommand {
         );
 
         // --- reload subcommand ---
-        root.then(Commands.literal("reload")
-                .then(Commands.argument("world", StringArgumentType.word())
-                        .then(Commands.argument("x1", IntegerArgumentType.integer())
-                                .then(Commands.argument("z1", IntegerArgumentType.integer())
-                                        .then(Commands.argument("x2", IntegerArgumentType.integer())
-                                                .then(Commands.argument("z2", IntegerArgumentType.integer())
-                                                        .executes(ctx -> reloadChunks(
-                                                                ctx.getSource(),
-                                                                StringArgumentType.getString(ctx, "world"),
-                                                                IntegerArgumentType.getInteger(ctx, "x1"),
-                                                                IntegerArgumentType.getInteger(ctx, "z1"),
-                                                                IntegerArgumentType.getInteger(ctx, "x2"),
-                                                                IntegerArgumentType.getInteger(ctx, "z2"),
-                                                                false
-                                                        ))
-                                                        .then(Commands.literal("force")
-                                                                .executes(ctx -> reloadChunks(
-                                                                        ctx.getSource(),
-                                                                        StringArgumentType.getString(ctx, "world"),
-                                                                        IntegerArgumentType.getInteger(ctx, "x1"),
-                                                                        IntegerArgumentType.getInteger(ctx, "z1"),
-                                                                        IntegerArgumentType.getInteger(ctx, "x2"),
-                                                                        IntegerArgumentType.getInteger(ctx, "z2"),
-                                                                        true
-                                                                ))
-                                                        )
-                                                )
+        var reloadWorldArg = Commands.argument("world", StringArgumentType.word());
+
+        // reload <world> all [force]
+        reloadWorldArg.then(Commands.literal("all")
+                .executes(ctx -> reloadAll(
+                        ctx.getSource(),
+                        StringArgumentType.getString(ctx, "world"),
+                        false
+                ))
+                .then(Commands.literal("force")
+                        .executes(ctx -> reloadAll(
+                                ctx.getSource(),
+                                StringArgumentType.getString(ctx, "world"),
+                                true
+                        ))
+                )
+        );
+
+        // reload <world> <x1> <z1> <x2> <z2> [force]
+        reloadWorldArg.then(Commands.argument("x1", IntegerArgumentType.integer())
+                .then(Commands.argument("z1", IntegerArgumentType.integer())
+                        .then(Commands.argument("x2", IntegerArgumentType.integer())
+                                .then(Commands.argument("z2", IntegerArgumentType.integer())
+                                        .executes(ctx -> reloadChunks(
+                                                ctx.getSource(),
+                                                StringArgumentType.getString(ctx, "world"),
+                                                IntegerArgumentType.getInteger(ctx, "x1"),
+                                                IntegerArgumentType.getInteger(ctx, "z1"),
+                                                IntegerArgumentType.getInteger(ctx, "x2"),
+                                                IntegerArgumentType.getInteger(ctx, "z2"),
+                                                false
+                                        ))
+                                        .then(Commands.literal("force")
+                                                .executes(ctx -> reloadChunks(
+                                                        ctx.getSource(),
+                                                        StringArgumentType.getString(ctx, "world"),
+                                                        IntegerArgumentType.getInteger(ctx, "x1"),
+                                                        IntegerArgumentType.getInteger(ctx, "z1"),
+                                                        IntegerArgumentType.getInteger(ctx, "x2"),
+                                                        IntegerArgumentType.getInteger(ctx, "z2"),
+                                                        true
+                                                ))
                                         )
                                 )
                         )
                 )
         );
+
+        root.then(Commands.literal("reload").then(reloadWorldArg));
 
         // --- set subcommand ---
         root.then(Commands.literal("set")
@@ -101,9 +123,67 @@ public class ChunkReloaderCommand {
         return 1;
     }
 
-    // ---- reload ----
+    // ---- reload <world> all [force] ----
+
+    /**
+     * Reload all tracked (player-visited) chunks outside protected area.
+     */
+    private static int reloadAll(CommandSourceStack source, String worldName, boolean force) {
+        if (ReloadQueue.isActive()) {
+            source.sendFailure(Component.literal("§cA reload is already in progress. Wait for it to complete."));
+            return 0;
+        }
+
+        var server = source.getServer();
+        ServerLevel level = AreaParser.getWorldByName(server, worldName);
+        if (level == null) {
+            source.sendFailure(Component.literal("§cWrong world name: " + worldName + ". Use /chunckreloader get worldName to list valid worlds."));
+            return 0;
+        }
+
+        ChunkLoadTracker tracker = ChunkLoadTracker.get(level);
+        List<ChunkPos> allTracked = tracker.getAllTrackedChunks();
+
+        if (allTracked.isEmpty()) {
+            source.sendSuccess(() -> Component.literal("§e[ChunkReloader] No tracked chunks found for world §b" + worldName + "§e. Players need to load chunks first."), false);
+            return 1;
+        }
+
+        // Filter out protected chunks (unless force)
+        List<ChunkPos> toReload = new ArrayList<>();
+        for (ChunkPos pos : allTracked) {
+            if (!force && ProtectedChunkManager.isProtected(level, pos)) {
+                continue;
+            }
+            toReload.add(pos);
+        }
+
+        if (toReload.isEmpty()) {
+            source.sendSuccess(() -> Component.literal("§e[ChunkReloader] All tracked chunks are protected. Nothing to reload."), false);
+            return 1;
+        }
+
+        if (!ReloadQueue.startBatch(level, toReload, force)) {
+            source.sendFailure(Component.literal("§cFailed to start reload. Another reload may be in progress."));
+            return 0;
+        }
+
+        source.sendSuccess(() -> Component.literal(
+                "§e[ChunkReloader] Queued §6" + toReload.size() + "§e chunks for regeneration in world §b" + worldName
+                        + (force ? " §c(force)" : "")
+        ), true);
+
+        return 1;
+    }
+
+    // ---- reload <world> <x1> <z1> <x2> <z2> [force] ----
 
     private static int reloadChunks(CommandSourceStack source, String worldName, int x1, int z1, int x2, int z2, boolean force) {
+        if (ReloadQueue.isActive()) {
+            source.sendFailure(Component.literal("§cA reload is already in progress. Wait for it to complete."));
+            return 0;
+        }
+
         var server = source.getServer();
 
         ServerLevel level = AreaParser.getWorldByName(server, worldName);
@@ -126,20 +206,56 @@ public class ChunkReloaderCommand {
             return 0;
         }
 
+        ChunkLoadTracker tracker = ChunkLoadTracker.get(level);
+        List<ChunkPos> toReload = new ArrayList<>();
+        long[] skippedProtected = {0};
+        long[] skippedUntracked = {0};
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                ChunkPos pos = new ChunkPos(x, z);
+
+                if (!force && ProtectedChunkManager.isProtected(level, pos)) {
+                    skippedProtected[0]++;
+                    continue;
+                }
+
+                // Without force, only reload chunks that have been visited by players (tracked)
+                if (!force && !tracker.isTracked(pos)) {
+                    skippedUntracked[0]++;
+                    continue;
+                }
+
+                toReload.add(pos);
+            }
+        }
+
+        if (toReload.isEmpty()) {
+            long sp = skippedProtected[0];
+            long su = skippedUntracked[0];
+            source.sendSuccess(() -> Component.literal(
+                    "§e[ChunkReloader] No chunks to reload. "
+                    + "Protected: " + sp + ", Not player-modified: " + su
+                    + ". Use 'force' to reload all chunks regardless."
+            ), false);
+            return 1;
+        }
+
+        if (!ReloadQueue.startBatch(level, toReload, force)) {
+            source.sendFailure(Component.literal("§cFailed to start reload. Another reload may be in progress."));
+            return 0;
+        }
+
+        long finalSkippedProtected = skippedProtected[0];
+        long finalSkippedUntracked = skippedUntracked[0];
+        int size = toReload.size();
         source.sendSuccess(() -> Component.literal(
-                "§e[ChunkReloader] Reloading §6" + totalChunks + "§e chunks in world §b" + worldName
-                        + "§e from (§b" + minX + "§e,§b" + minZ + "§e) to (§b" + maxX + "§e,§b" + maxZ + "§e)..."),
-                true
-        );
+                "§e[ChunkReloader] Queued §6" + size + "§e / §7" + totalChunks + "§e chunks for regeneration in world §b" + worldName
+                        + " §7(protected: " + finalSkippedProtected + ", unmodified: " + finalSkippedUntracked + ")"
+                        + (force ? " §c(force)" : "")
+        ), true);
 
-        long[] counters = ChunkRegenerator.regenerateChunks(level, pos1, pos2, force);
-
-        source.sendSuccess(() -> Component.literal(
-                "§a[ChunkReloader] Done! §2" + counters[0] + "§a regenerated, §7" + counters[1] + "§a skipped, §c" + counters[2] + "§a failed."),
-                true
-        );
-
-        return (int) counters[0];
+        return (int) toReload.size();
     }
 
     // ---- set ----
@@ -151,7 +267,6 @@ public class ChunkReloaderCommand {
             switch (option.toLowerCase()) {
                 case "enableautoreload":
                 case "enable_auto_reload": {
-                    // format: <world> <true/false>
                     var wv = parseWorldValue(server, args);
                     if (wv == null) return 0;
                     Config.getInstance().setAutoReload(wv.worldName, Boolean.parseBoolean(wv.value));
@@ -161,7 +276,6 @@ public class ChunkReloaderCommand {
 
                 case "staledays":
                 case "stale_days": {
-                    // format: <world> <days>
                     var wv = parseWorldValue(server, args);
                     if (wv == null) return 0;
                     int days = Integer.parseInt(wv.value);
@@ -176,7 +290,6 @@ public class ChunkReloaderCommand {
 
                 case "nonrecordarea":
                 case "non_record_area": {
-                    // format: <world> <x1,z1,x2,z2>  or  <world>:<x1,z1,x2,z2>
                     String areaStr = buildAreaString(server, args);
                     if (areaStr == null) return 0;
                     Config.getInstance().nonRecordArea.set(areaStr);
@@ -225,9 +338,6 @@ public class ChunkReloaderCommand {
         }
     }
 
-    /**
-     * 解析 <world> <value> 格式，返回 (worldName, value) 或 null
-     */
     private static record WorldValue(String worldName, String value) {}
 
     private static WorldValue parseWorldValue(net.minecraft.server.MinecraftServer server, String args) {
@@ -244,11 +354,6 @@ public class ChunkReloaderCommand {
         return new WorldValue(worldName, value);
     }
 
-    /**
-     * Build area string with world prefix.
-     * Input format: <world> <x1,z1,x2,z2>
-     * Output format: <world>:<x1>,<z1>,<x2>,<z2>
-     */
     private static String buildAreaString(net.minecraft.server.MinecraftServer server, String args) {
         String[] parts = args.split(" ", 2);
         if (parts.length < 2) {
@@ -258,12 +363,10 @@ public class ChunkReloaderCommand {
         String worldName = parts[0].trim();
         String coords = parts[1].trim();
 
-        // 校验世界名
         if (!AreaParser.isValidWorld(server, worldName)) {
             throw new IllegalArgumentException("Wrong world name: " + worldName + ". Use /chunckreloader get worldName to list valid worlds.");
         }
 
-        // 校验坐标格式
         String[] coordParts = coords.replace(":", ",").split(",");
         if (coordParts.length != 4) {
             throw new IllegalArgumentException("Invalid coordinates. Format: x1,z1,x2,z2");
@@ -294,6 +397,16 @@ public class ChunkReloaderCommand {
         source.sendSuccess(() -> Component.literal("§eNon-Record Area: §f" + config.nonRecordArea.get()), false);
         source.sendSuccess(() -> Component.literal("§eProtect Area: §f" + (config.protectArea.get().isEmpty() ? "(none)" : config.protectArea.get())), false);
         source.sendSuccess(() -> Component.literal("§eCheck Interval: §f" + config.autoReloadInterval.get() + "s"), false);
+
+        // Show reload queue progress if active
+        if (ReloadQueue.isActive()) {
+            source.sendSuccess(() -> Component.literal("§6=== Reload Progress ==="), false);
+            source.sendSuccess(() -> Component.literal("§eProgress: §f" + ReloadQueue.getProgress() + "%"), false);
+            source.sendSuccess(() -> Component.literal("§eProcessed: §f" + ReloadQueue.getProcessed() + "/" + ReloadQueue.getTotalQueued()), false);
+            source.sendSuccess(() -> Component.literal("§aRegenerated: §f" + ReloadQueue.getRegenCount()), false);
+            source.sendSuccess(() -> Component.literal("§7Skipped: §f" + ReloadQueue.getSkipCount()), false);
+            source.sendSuccess(() -> Component.literal("§cFailed: §f" + ReloadQueue.getFailCount()), false);
+        }
 
         return 1;
     }

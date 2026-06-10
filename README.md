@@ -5,11 +5,14 @@
 ## 功能
 
 - **`/chunckreloader reload`** - 手动重载指定世界的指定范围区块
+- **`/chunckreloader reload <世界> all`** - 重载所有玩家更新过的过期区块
 - **`/chunckreloader set`** - 游戏内直接修改配置，无需编辑文件
 - **`/chunckreloader get worldName`** - 获取所有可用世界名称列表
 - **`/chunckreloader status`** - 查看当前配置和运行状态
 - **自动重载** - 自动检测并重载超过指定天数未加载的区块
 - **领地保护** - 支持 GriefDefender / FTB Chunks / OPAC（软依赖）
+- **防卡顿分批处理** - 所有重载操作每 tick 最多处理 50 个区块，避免服务器卡顿
+- **玩家更新检测** - 矩形重载默认只重载被玩家访问/更新过的区块，避免无效重载
 - **配置文件** - 所有功能均可通过配置文件或命令调整
 
 ## 安装
@@ -47,7 +50,16 @@
 | `世界` | 世界名称（如 `overworld`、`the_nether`、`the_end`），用 `/chunckreloader get worldName` 查看 |
 | `x1`, `z1` | 第一个区块坐标 |
 | `x2`, `z2` | 第二个区块坐标 |
-| `force` | 可选，添加此参数忽略保护区域强制重载 |
+| `force` | 可选，添加此参数忽略保护区域和玩家更新检测，强制重载所有区块 |
+
+**默认行为（不加 force）**:
+- 跳过保护区域内的区块
+- **只重载被玩家访问/更新过的区块**（通过 ChunkLoadTracker 追踪），未追踪的区块跳过
+- 分批处理（每 tick 50 个），避免服务器卡顿
+
+**使用 force**:
+- 忽略保护区域
+- 重载矩形内所有区块，无论是否被玩家更新过
 
 **示例**:
 ```
@@ -57,6 +69,23 @@
 ```
 
 > **提示**: 如果世界名错误会提示 `Wrong world name`。区块坐标 = 方块坐标 ÷ 16（向下取整）。
+
+### `/chunckreloader reload <世界> all [force]`
+
+重载指定世界中所有被玩家访问/更新过的区块，跳过保护区域。
+
+| 参数 | 说明 |
+|------|------|
+| `世界` | 世界名称（如 `overworld`、`the_nether`、`the_end`） |
+| `force` | 可选，忽略保护区域强制重载 |
+
+**注意**: 只有被玩家加载过的区块才会被追踪。首次运行`all`时如果没有追踪数据会提示"no tracked chunks"。
+
+**示例**:
+```
+/chunckreloader reload overworld all
+/chunckreloader reload the_end all force
+```
 
 ### `/chunckreloader set <选项> <值>`
 
@@ -84,18 +113,51 @@
 
 ### `/chunckreloader status`
 
-显示当前所有配置值和运行状态。
+显示当前所有配置值和运行状态。如果正在进行批量重载，还会显示实时进度。
 
 **示例**:
 ```
 /chunckreloader status
 ```
+输出示例:
+```
+=== ChunkReloader Status ===
+Auto Reload: overworld:false
+Stale Days: overworld:14
+Non-Record Area: overworld:-50000,-50000,50000,50000
+Protect Area: overworld:-50000,-50000,50000,50000
+Check Interval: 3600s
+```
+有重载进行中时额外显示:
+```
+=== Reload Progress ===
+Progress: 45%
+Processed: 4500/10000
+Regenerated: 3800
+Skipped: 600
+Failed: 100
+```
 
 ### 工作原理
 
-1. 清除指定区块在 `.mca` 区域文件中的记录
-2. 从内存中卸载该区块
-3. 当玩家下次靠近时，游戏会自动重新生成地形
+1. 玩家加载区块时，模组自动追踪该区块的加载信息（用于 `all` 命令和自动重载）
+2. 清除指定区块在 `.mca` 区域文件中的记录
+3. 从内存中卸载该区块
+4. 当玩家下次靠近时，游戏会自动重新生成地形
+
+### 防卡顿机制
+
+所有重载操作（包括手动命令和自动重载）均采用**分批处理**：
+- 每 tick 最多处理 50 个区块
+- 大范围重载会在后台逐步完成，不会导致服务器"时间静止"
+- 使用 `/chunckreloader status` 查看实时进度
+
+### 玩家更新检测
+
+矩形重载命令 `/chunckreloader reload <世界> <x1> <z1> <x2> <z2>`（不加 force）：
+- **只重载被玩家访问过的区块**，未追踪的区块自动跳过
+- 有效避免重载大范围无人区时浪费性能
+- 添加 `force` 参数可忽略此检测，强制重载所有区块
 
 ## 配置文件
 
@@ -160,11 +222,13 @@
 
 ## 自动重载机制
 
-1. 玩家加载区块时，模组记录该区块的加载时间
-2. 每隔 `autoReloadInterval` 秒，检查所有记录的区块
+1. 玩家加载区块时，模组自动记录该区块（只要不在非记录区域和保护区域内）
+2. 每隔 `autoReloadInterval` 秒，检查所有记录的区块（仅在对应世界开启了自动重载时）
 3. 如果某个区块的最后加载时间超过了 `staleDays` 天，将其加入重载队列
 4. 每次最多处理 50 个过期区块，避免造成服务器卡顿
 5. 重载后从追踪列表中移除该区块，除非再次被玩家加载
+
+> **注意**: 区块追踪始终启用，但自动重载检查仅在 `enableAutoReload` 开启的世界中执行。手动使用 `all` 命令时无需开启自动重载。
 
 ## 构建
 

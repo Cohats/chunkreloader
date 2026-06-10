@@ -10,10 +10,6 @@ import net.minecraft.world.level.ChunkPos;
 public class ChunkLoadHandler {
 
     public static void onChunkLoad(ChunkLoadTracker tracker, ServerLevel level, ChunkPos pos) {
-        if (!Config.getInstance().getAutoReload(level)) {
-            return;
-        }
-
         // 检查是否在非记录区域中
         if (isInNonRecordArea(level, pos)) {
             return;

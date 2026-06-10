@@ -4,6 +4,7 @@ import com.chunkreloader.command.ChunkReloaderCommand;
 import com.chunkreloader.config.Config;
 import com.chunkreloader.handler.ChunkLoadHandler;
 import com.chunkreloader.manager.ChunkLoadTracker;
+import com.chunkreloader.manager.ReloadQueue;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
@@ -61,6 +62,9 @@ public class ChunkReloaderMod {
     private void onServerTick(ServerTickEvent.Post event) {
         var server = event.getServer();
         if (server == null) return;
+
+        // Process batch reload queue (manual reload command)
+        ReloadQueue.tick();
 
         // Process each world's tracker
         for (var key : server.levelKeys()) {

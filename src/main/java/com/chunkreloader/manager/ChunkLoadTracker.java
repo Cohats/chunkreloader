@@ -74,6 +74,19 @@ public class ChunkLoadTracker extends SavedData {
         return loadTimestamps.containsKey(ChunkPos.asLong(pos.x, pos.z));
     }
 
+    /**
+     * Get all tracked chunk positions in this world.
+     */
+    public List<ChunkPos> getAllTrackedChunks() {
+        List<ChunkPos> result = new ArrayList<>();
+        for (Long packedPos : loadTimestamps.keySet()) {
+            int x = ChunkPos.getX(packedPos);
+            int z = ChunkPos.getZ(packedPos);
+            result.add(new ChunkPos(x, z));
+        }
+        return result;
+    }
+
     public void tick(ServerLevel level) {
         if (!Config.getInstance().getAutoReload(level)) {
             return;
