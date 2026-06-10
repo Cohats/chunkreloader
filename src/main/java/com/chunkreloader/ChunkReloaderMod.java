@@ -23,8 +23,6 @@ public class ChunkReloaderMod {
     public static final String MODID = "chunkreloader";
     public static final Logger LOGGER = LoggerFactory.getLogger(MODID);
 
-    private ChunkLoadTracker tracker;
-
     public ChunkReloaderMod(IEventBus modBus, ModContainer modContainer) {
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC, MODID + "-common.toml");
 
@@ -38,14 +36,10 @@ public class ChunkReloaderMod {
     }
 
     private void onServerStarting(ServerStartingEvent event) {
-        tracker = ChunkLoadTracker.get(event.getServer().overworld());
         LOGGER.info("ChunkReloader started");
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
-        if (tracker != null) {
-            tracker.setDirty();
-        }
         LOGGER.info("ChunkReloader stopped");
     }
 
@@ -54,8 +48,9 @@ public class ChunkReloaderMod {
     }
 
     private void onChunkLoad(ChunkEvent.Load event) {
-        if (tracker != null && event.getLevel() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
-            ChunkLoadHandler.onChunkLoad(tracker, serverLevel, event.getChunk().getPos());
+        if (event.getLevel() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            var worldTracker = ChunkLoadTracker.get(serverLevel);
+            ChunkLoadHandler.onChunkLoad(worldTracker, serverLevel, event.getChunk().getPos());
         }
     }
 

@@ -27,11 +27,15 @@ public class AreaParser {
             return fullName.equals(worldName) || shortName.equals(worldName);
         }
 
+        /**
+         * 检查区块是否在区域内。
+         * 区域值为方块坐标，自动转换为区块坐标进行比较。
+         */
         public boolean containsChunk(ChunkPos pos) {
-            int minX = Math.min(x1, x2);
-            int maxX = Math.max(x1, x2);
-            int minZ = Math.min(z1, z2);
-            int maxZ = Math.max(z1, z2);
+            int minX = Math.min(x1, x2) >> 4;
+            int maxX = Math.max(x1, x2) >> 4;
+            int minZ = Math.min(z1, z2) >> 4;
+            int maxZ = Math.max(z1, z2) >> 4;
             return pos.x >= minX && pos.x <= maxX && pos.z >= minZ && pos.z <= maxZ;
         }
     }

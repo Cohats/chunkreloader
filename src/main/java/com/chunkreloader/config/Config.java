@@ -40,7 +40,7 @@ public class Config {
                 .define("enableAutoReload", "overworld:false");
 
         nonRecordArea = builder
-                .comment("Area where chunks are NOT tracked for stale detection. Format: [world:]x1,z1,x2,z2 (block coordinates, optional world prefix).")
+                .comment("Area where chunks are NOT tracked for stale detection. Format: [world:]x1,z1,x2,z2 (block coordinates, optional world prefix). Default: ~3125x3125 chunks around spawn.")
                 .define("nonRecordArea", "overworld:-50000,-50000,50000,50000");
 
         staleDays = builder
