@@ -6,29 +6,42 @@ import net.minecraft.world.level.ChunkPos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashSet;
-import java.util.Set;
-
 public class ProtectedChunkManager {
     private static final Logger LOGGER = LoggerFactory.getLogger("ChunkReloaderProtection");
+
+    // Detection flags (lazy-loaded)
     private static Boolean griefDefenderLoaded = null;
+    private static Boolean ftbChunksLoaded = null;
+    private static Boolean opacLoaded = null;
 
     /**
      * Check if a chunk is protected (should not be regenerated).
      */
     public static boolean isProtected(ServerLevel level, ChunkPos pos) {
-        // 1. Check config-based protection area
+        // 1. Config-based protection area
         if (isInProtectArea(pos)) {
             return true;
         }
 
-        // 2. Check GriefDefender (soft dependency)
+        // 2. GriefDefender
         if (isGriefDefenderLoaded() && isGriefDefenderClaim(level, pos)) {
+            return true;
+        }
+
+        // 3. FTB Chunks
+        if (isFtbChunksLoaded() && isFtbClaim(level, pos)) {
+            return true;
+        }
+
+        // 4. Open Parties and Claims (开放领地)
+        if (isOpacLoaded() && isOpacClaim(level, pos)) {
             return true;
         }
 
         return false;
     }
+
+    // ---- Config-based protection ----
 
     private static boolean isInProtectArea(ChunkPos pos) {
         String areaStr = Config.getInstance().protectArea.get();
@@ -61,6 +74,8 @@ public class ProtectedChunkManager {
         }
     }
 
+    // ---- GriefDefender ----
+
     private static boolean isGriefDefenderLoaded() {
         if (griefDefenderLoaded == null) {
             try {
@@ -77,24 +92,165 @@ public class ProtectedChunkManager {
     @SuppressWarnings("unchecked")
     private static boolean isGriefDefenderClaim(ServerLevel level, ChunkPos pos) {
         try {
-            // Use reflection for soft dependency
             Class<?> gdApi = Class.forName("com.griefdefender.api.GriefDefender");
-            Class<?> claimManagerClass = Class.forName("com.griefdefender.api.claim.ClaimManager");
-
-            // Get the core instance
             Object core = gdApi.getMethod("getCore").invoke(null);
-
-            // Get the claim manager for this world
             Object claimManager = core.getClass()
                     .getMethod("getClaimManager", java.util.UUID.class)
                     .invoke(core, level.dimension().location().toString());
-
-            // Check if there's a claim at the chunk position
             Object claim = claimManager.getClass()
                     .getMethod("getClaimAt", int.class, int.class)
                     .invoke(claimManager, pos.getMinBlockX(), pos.getMinBlockZ());
-
             return claim != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // ---- FTB Chunks ----
+
+    private static boolean isFtbChunksLoaded() {
+        if (ftbChunksLoaded == null) {
+            try {
+                Class.forName("dev.ftb.mods.ftbchunks.api.FTBChunksAPI");
+                ftbChunksLoaded = true;
+                LOGGER.info("FTB Chunks detected - protected claims will be respected");
+            } catch (ClassNotFoundException e) {
+                ftbChunksLoaded = false;
+            }
+        }
+        return ftbChunksLoaded;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean isFtbClaim(ServerLevel level, ChunkPos pos) {
+        try {
+            Class<?> apiClass = Class.forName("dev.ftb.mods.ftbchunks.api.FTBChunksAPI");
+
+            // Try v2 API: FTBChunksAPI.manager()
+            try {
+                // Get the API manager
+                Object manager = apiClass.getMethod("manager").invoke(null);
+
+                // Try: manager.getChunk(ServerLevel, BlockPos)
+                try {
+                    Object chunk = manager.getClass()
+                            .getMethod("getChunk", ServerLevel.class, net.minecraft.core.BlockPos.class)
+                            .invoke(manager, level, pos.getWorldPosition());
+                    if (chunk != null) {
+                        // Check if chunk has a team (claimed)
+                        Object team = chunk.getClass().getMethod("getTeam").invoke(chunk);
+                        return team != null;
+                    }
+                } catch (NoSuchMethodException ignored) {}
+
+                // Try: manager.isClaimed(ServerLevel, BlockPos)
+                try {
+                    Object result = manager.getClass()
+                            .getMethod("isClaimed", ServerLevel.class, net.minecraft.core.BlockPos.class)
+                            .invoke(manager, level, pos.getWorldPosition());
+                    if (result instanceof Boolean b) return b;
+                } catch (NoSuchMethodException ignored) {}
+
+                // Try: manager.getClaimAt(ServerLevel, ChunkPos)
+                try {
+                    Object claim = manager.getClass()
+                            .getMethod("getClaimAt", ServerLevel.class, ChunkPos.class)
+                            .invoke(manager, level, pos);
+                    return claim != null;
+                } catch (NoSuchMethodException ignored) {}
+
+            } catch (NoSuchMethodException ignored) {}
+
+            // Try legacy API: FTBChunksAPI.api()
+            try {
+                Object api = apiClass.getMethod("api").invoke(null);
+                Object manager = api.getClass().getMethod("getManager").invoke(api);
+                Object chunkData = manager.getClass()
+                        .getMethod("getChunk", ServerLevel.class, net.minecraft.core.BlockPos.class)
+                        .invoke(manager, level, pos.getWorldPosition());
+                if (chunkData != null) {
+                    Object team = chunkData.getClass().getMethod("getTeam").invoke(chunkData);
+                    return team != null;
+                }
+            } catch (NoSuchMethodException ignored) {}
+
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // ---- Open Parties and Claims (OPAC) ----
+
+    private static boolean isOpacLoaded() {
+        if (opacLoaded == null) {
+            try {
+                // Try multiple possible OPAC main classes
+                boolean found = false;
+                for (String clz : new String[]{
+                        "xaero.pac.common.server.api.OpenPACServerAPI",
+                        "xaero.pac.OpenPartiesAndClaims",
+                        "xaero.pac.common.claims.api.IClaimManager"
+                }) {
+                    try {
+                        Class.forName(clz);
+                        found = true;
+                        break;
+                    } catch (ClassNotFoundException ignored) {}
+                }
+                opacLoaded = found;
+                if (found) {
+                    LOGGER.info("Open Parties and Claims detected - protected claims will be respected");
+                }
+            } catch (Exception e) {
+                opacLoaded = false;
+            }
+        }
+        return opacLoaded;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean isOpacClaim(ServerLevel level, ChunkPos pos) {
+        try {
+            // Try approach 1: OpenPACServerAPI
+            try {
+                Class<?> serverApiClass = Class.forName("xaero.pac.common.server.api.OpenPACServerAPI");
+                Object serverApi = serverApiClass.getMethod("get", net.minecraft.server.MinecraftServer.class)
+                        .invoke(null, level.getServer());
+                Object claimsManager = serverApi.getClass().getMethod("getServerClaimsManager").invoke(serverApi);
+                Object claim = claimsManager.getClass()
+                        .getMethod("getClaim", int.class, int.class, net.minecraft.resources.ResourceKey.class)
+                        .invoke(claimsManager, pos.x, pos.z, level.dimension());
+                return claim != null;
+            } catch (Exception ignored) {}
+
+            // Try approach 2: static ClaimManager
+            try {
+                Class<?> claimManagerClass = Class.forName("xaero.pac.common.claims.api.IClaimManager");
+                // Try to find the manager instance
+                Class<?> pacClass = Class.forName("xaero.pac.OpenPartiesAndClaims");
+                Object instance = pacClass.getMethod("getInstance").invoke(null);
+                Object manager = instance.getClass().getMethod("getClaimManager").invoke(instance);
+                Object claim = manager.getClass()
+                        .getMethod("getClaim", int.class, int.class, net.minecraft.resources.ResourceKey.class)
+                        .invoke(manager, pos.x, pos.z, level.dimension());
+                return claim != null;
+            } catch (Exception ignored) {}
+
+            // Try approach 3: direct claim check via chunk pos
+            try {
+                Class<?> utilClass = Class.forName("xaero.pac.common.claims.player.IPlayerClaimManager");
+                Object manager = utilClass.getMethod("get", ServerLevel.class)
+                        .invoke(null, level);
+                if (manager != null) {
+                    Object claim = manager.getClass()
+                            .getMethod("getClaim", int.class, int.class)
+                            .invoke(manager, pos.x, pos.z);
+                    return claim != null;
+                }
+            } catch (Exception ignored) {}
+
+            return false;
         } catch (Exception e) {
             return false;
         }
