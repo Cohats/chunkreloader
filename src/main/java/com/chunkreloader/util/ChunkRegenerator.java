@@ -3,35 +3,16 @@ package com.chunkreloader.util;
 import com.chunkreloader.ChunkReloaderMod;
 import com.chunkreloader.manager.ChunkLoadTracker;
 import com.chunkreloader.manager.ProtectedChunkManager;
-import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtIo;
-import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ChunkMap;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.LevelChunk;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayOutputStream;
-import java.io.DataOutputStream;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.List;
-import java.util.zip.Deflater;
-import java.util.zip.DeflaterOutputStream;
 
 public class ChunkRegenerator {
     private static final Logger LOGGER = LoggerFactory.getLogger("ChunkReloaderRegen");
-
-    // Reflective handles (cached for performance)
-    private static Object storageInstance;
-    private static Method storageWriteMethod;
-    private static Field storageField;
-    private static boolean storageResolved = false;
 
     /**
      * Regenerate all chunks in the rectangle between pos1 and pos2.
@@ -123,12 +104,14 @@ public class ChunkRegenerator {
     }
 
     /**
-     * Regenerate a single chunk by clearing disk (MCA) data.
+     * Delete a chunk from disk entirely (MCA header set to 0).
      *
-     * If chunk is loaded in memory and has players → skip (safety).
-     * Otherwise: clear MCA on disk so future loads regenerate fresh terrain.
-     * If loaded in memory, also mark as unsaved=false + clear to air
-     * so the old data is not persisted when the chunk naturally unloads.
+     * When the chunk is loaded next (player walks near), Minecraft finds no data
+     * on disk and generates brand-new terrain from scratch.
+     *
+     * If the chunk is currently in memory, mark unsaved=false so the server
+     * does NOT persist the old data back to the (now-deleted) MCA entry.
+     * No blocks are modified in memory — the player sees no immediate change.
      */
     private static boolean regenerateSingleChunk(ServerLevel level, ChunkPos pos) {
         // Safety: skip if any player is in this chunk
@@ -139,17 +122,13 @@ public class ChunkRegenerator {
 
         LevelChunk existingChunk = level.getChunkSource().getChunkNow(pos.x, pos.z);
 
-        // Clear from disk (MCA file or storage write)
+        // Delete chunk data from disk by clearing the MCA header entry
         clearChunkFromDisk(level, pos);
 
-        // If chunk is loaded in memory, prevent it from saving old data
-        // and clear blocks for immediate visual effect
+        // If chunk is loaded in memory, prevent the old data from being saved back
         if (existingChunk != null) {
-            // Mark as not-unsaved so the server won't persist the old data
             existingChunk.setUnsaved(false);
-            // Clear blocks to air so the player sees immediate change
-            fallbackClearChunk(level, pos);
-            LOGGER.debug("Cleared in-memory chunk {} (unsaved={})", pos, existingChunk.isUnsaved());
+            LOGGER.debug("Chunk {} in memory, marked unsaved=false", pos);
         }
 
         ChunkLoadTracker.get(level).removeRecord(pos);
@@ -157,109 +136,17 @@ public class ChunkRegenerator {
     }
 
     /**
-     * Clear chunk data from disk.
-     * Tries storage write via reflection first, falls back to MCA manipulation.
+     * Delete chunk data from disk by clearing the MCA header entry.
+     * When loaded next, Minecraft finds no data and generates fresh terrain.
      */
     private static void clearChunkFromDisk(ServerLevel level, ChunkPos pos) {
-        try {
-            ServerChunkCache cache = level.getChunkSource();
-            ChunkMap chunkMap = cache.chunkMap;
-
-            // Try reflection storage write first
-            if (tryWriteEmptyChunk(chunkMap, pos)) {
-                LOGGER.debug("Wrote empty chunk data to storage for {}", pos);
-            } else {
-                // Fallback: directly modify the MCA file
-                clearChunkFromMcaFile(level, pos);
-            }
-        } catch (Exception e) {
-            LOGGER.warn("Disk clear failed for chunk {}: {}", pos, e.getMessage());
-        }
+        clearChunkFromMcaFile(level, pos);
     }
 
     /**
-     * Try to write an empty chunk tag to the storage to trigger regeneration.
-     */
-    private static boolean tryWriteEmptyChunk(ChunkMap chunkMap, ChunkPos pos) {
-        try {
-            if (!storageResolved) {
-                resolveStorage(chunkMap);
-            }
-
-            if (storageWriteMethod != null && storageInstance != null) {
-                CompoundTag emptyTag = new CompoundTag();
-                emptyTag.putInt("xPos", pos.x);
-                emptyTag.putInt("zPos", pos.z);
-                emptyTag.putString("Status", "minecraft:empty");
-                storageWriteMethod.invoke(storageInstance, pos, emptyTag);
-                return true;
-            }
-        } catch (Exception e) {
-            LOGGER.debug("Storage write failed: {}", e.getMessage());
-        }
-        return false;
-    }
-
-    /**
-     * Find the storage field in ChunkMap by type at runtime.
-     */
-    private static void resolveStorage(ChunkMap chunkMap) {
-        storageResolved = true;
-        // Search by type name
-        for (Field field : chunkMap.getClass().getDeclaredFields()) {
-            String typeName = field.getType().getName().toLowerCase();
-            if ((typeName.contains("chunkstorage") || typeName.contains("regionstorage"))
-                    && !typeName.contains("light")) {
-                field.setAccessible(true);
-                storageField = field;
-                try {
-                    storageInstance = field.get(chunkMap);
-                    findWriteMethod(storageInstance);
-                    LOGGER.info("Found storage via type: {} as {}", field.getName(), typeName);
-                    return;
-                } catch (Exception e) {
-                    LOGGER.debug("Could not access storage field {}: {}", field.getName(), e.getMessage());
-                }
-            }
-        }
-
-        // Fallback: try known names
-        for (String name : new String[]{"storage", "chunkStorage", "regionStorage"}) {
-            try {
-                Field field = chunkMap.getClass().getDeclaredField(name);
-                field.setAccessible(true);
-                storageField = field;
-                storageInstance = field.get(chunkMap);
-                findWriteMethod(storageInstance);
-                LOGGER.info("Found storage via name: {}", name);
-                return;
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
-    /**
-     * Find the write method on the storage object.
-     */
-    private static void findWriteMethod(Object storage) {
-        if (storage == null) return;
-        for (Method m : storage.getClass().getMethods()) {
-            if (m.getName().equals("write") || m.getName().equals("save")) {
-                Class<?>[] params = m.getParameterTypes();
-                if (params.length == 2
-                        && params[0].getSimpleName().contains("ChunkPos")
-                        && params[1].getSimpleName().contains("Compound")) {
-                    storageWriteMethod = m;
-                    LOGGER.info("Found write method: {}", m.getName());
-                    return;
-                }
-            }
-        }
-    }
-
-    /**
-     * Direct MCA file manipulation: write a minimal empty chunk NBT (Status=empty)
-     * so Minecraft regenerates the chunk when it's loaded again.
+     * Delete chunk data from the MCA file by clearing the header entry.
+     * Sets the sector offset to 0, marking the chunk as non-existent.
+     * Minecraft will generate fresh terrain when the chunk is next loaded.
      */
     private static void clearChunkFromMcaFile(ServerLevel level, ChunkPos pos) {
         try {
@@ -275,88 +162,31 @@ public class ChunkRegenerator {
                 return;
             }
 
-            // Create minimal empty chunk NBT — Minecraft will regenerate terrain
-            // when it sees Status="minecraft:empty"
-            CompoundTag emptyChunk = new CompoundTag();
-            emptyChunk.putInt("xPos", pos.x);
-            emptyChunk.putInt("zPos", pos.z);
-            emptyChunk.putString("Status", "minecraft:empty");
-            emptyChunk.putInt("DataVersion", 3839); // 1.21.1 data version
-            emptyChunk.put("sections", new ListTag());     // empty sections
-            emptyChunk.put("block_entities", new ListTag()); // no block entities
-            emptyChunk.put("block_ticks", new ListTag());
-            emptyChunk.put("fluid_ticks", new ListTag());
-            emptyChunk.put("entities", new ListTag());
-            emptyChunk.put("HeightMap", new CompoundTag()); // empty heightmap
-
-            // Compress NBT with ZLib (compression type 2, standard for MC region files)
-            byte[] compressed;
-            try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                 DeflaterOutputStream deflater = new DeflaterOutputStream(baos, new Deflater(Deflater.DEFAULT_COMPRESSION));
-                 DataOutputStream dataOut = new DataOutputStream(deflater)) {
-                NbtIo.write(emptyChunk, dataOut);
-                dataOut.flush();
-                compressed = baos.toByteArray();
-            }
-
-            // Calculate required sectors (each sector = 4096 bytes)
-            // Entry format: [4 bytes length][1 byte compression][compressed bytes]
-            int entryLength = 1 + compressed.length; // 1 = compression type byte
-            int sectorCount = (entryLength + 4095) / 4096;
-            if (sectorCount < 1) sectorCount = 1;
-
             try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(regionFile.toFile(), "rw")) {
-                // Read current header to find existing chunk
+                // Check if chunk exists in the MCA header
                 file.seek(chunkIndex * 4);
                 byte[] header = new byte[4];
                 file.read(header);
-                int currentSector = ((header[0] & 0xFF) << 16)
+                int sectorOffset = ((header[0] & 0xFF) << 16)
                         | ((header[1] & 0xFF) << 8)
                         | (header[2] & 0xFF);
-                int currentSectors = header[3] & 0xFF;
 
-                int writeSector;
-                if (currentSector > 0 && currentSectors >= sectorCount) {
-                    // Reuse existing space
-                    writeSector = currentSector;
-                } else {
-                    // Append to end of file, aligned to sector boundary
-                    long fileLen = file.length();
-                    writeSector = (int) ((fileLen + 4095) / 4096);
+                if (sectorOffset == 0) {
+                    LOGGER.debug("Chunk {} already absent from MCA r.{}.{}.mca", pos, regionX, regionZ);
+                    return;
                 }
 
-                // Write: [4 bytes entry length][1 byte compression type 2=ZLib][compressed NBT]
-                long writePos = (long) writeSector * 4096;
-                file.seek(writePos);
-                file.writeInt(entryLength);
-                file.writeByte(2); // ZLib compression
-                file.write(compressed);
-
-                // Pad remaining sector space with zeros
-                long endPos = writePos + sectorCount * 4096L;
-                if (file.length() < endPos) {
-                    file.setLength(endPos);
-                }
-
-                // Update header
+                // Clear header: set offset=0, count=0 (marks chunk as non-existent)
                 file.seek(chunkIndex * 4);
-                byte[] newHeader = new byte[]{
-                        (byte) ((writeSector >> 16) & 0xFF),
-                        (byte) ((writeSector >> 8) & 0xFF),
-                        (byte) (writeSector & 0xFF),
-                        (byte) sectorCount
-                };
-                file.write(newHeader);
-
-                // Update timestamp
+                file.write(new byte[]{0, 0, 0, 0});
+                // Clear timestamp
                 file.seek(4096L + chunkIndex * 4);
-                file.writeInt((int) (System.currentTimeMillis() / 1000));
+                file.write(new byte[]{0, 0, 0, 0});
 
-                LOGGER.debug("Wrote empty chunk {} to MCA r.{}.{}.mca (sector={}, count={})",
-                        pos, regionX, regionZ, writeSector, sectorCount);
+                LOGGER.debug("Deleted chunk {} from MCA r.{}.{}.mca", pos, regionX, regionZ);
             }
         } catch (Exception e) {
-            LOGGER.warn("Failed to write empty chunk data for {}: {}", pos, e.getMessage());
+            LOGGER.warn("Failed to delete chunk {} from MCA: {}", pos, e.getMessage());
         }
     }
 
@@ -395,25 +225,4 @@ public class ChunkRegenerator {
         return null;
     }
 
-    /**
-     * Fallback: set all blocks in the chunk to air using public API.
-     */
-    private static void fallbackClearChunk(ServerLevel level, ChunkPos pos) {
-        int minY = level.getMinBuildHeight();
-        int maxY = level.getMaxBuildHeight();
-
-        for (int x = 0; x < 16; x++) {
-            for (int z = 0; z < 16; z++) {
-                for (int y = minY; y < maxY; y++) {
-                    level.setBlock(
-                            new BlockPos(pos.getMinBlockX() + x, y, pos.getMinBlockZ() + z),
-                            Blocks.AIR.defaultBlockState(),
-                            3
-                    );
-                }
-            }
-        }
-
-        LOGGER.debug("Cleared chunk {} with air blocks (fallback)", pos);
-    }
 }
