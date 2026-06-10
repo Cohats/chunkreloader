@@ -5,6 +5,8 @@ import com.chunkreloader.manager.ChunkLoadTracker;
 import com.chunkreloader.manager.ProtectedChunkManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtIo;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ChunkMap;
@@ -14,9 +16,13 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.zip.Deflater;
+import java.util.zip.DeflaterOutputStream;
 
 public class ChunkRegenerator {
     private static final Logger LOGGER = LoggerFactory.getLogger("ChunkReloaderRegen");
@@ -252,7 +258,8 @@ public class ChunkRegenerator {
     }
 
     /**
-     * Direct MCA file manipulation: clear the chunk header entry.
+     * Direct MCA file manipulation: write a minimal empty chunk NBT (Status=empty)
+     * so Minecraft regenerates the chunk when it's loaded again.
      */
     private static void clearChunkFromMcaFile(ServerLevel level, ChunkPos pos) {
         try {
@@ -262,39 +269,94 @@ public class ChunkRegenerator {
             int localZ = pos.z & 31;
             int chunkIndex = localX + localZ * 32;
 
-            // Try to find the region file
             java.nio.file.Path regionFile = findRegionFile(level, regionX, regionZ);
-
             if (regionFile == null) {
                 LOGGER.debug("Region file not found for chunk {}", pos);
                 return;
             }
 
-            try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(regionFile.toFile(), "rw")) {
-                // Check if chunk exists in the MCA header
-                file.seek(chunkIndex * 4);
-                byte[] offsetBytes = new byte[4];
-                file.read(offsetBytes);
-                int sectorOffset = ((offsetBytes[0] & 0xFF) << 16)
-                        | ((offsetBytes[1] & 0xFF) << 8)
-                        | (offsetBytes[2] & 0xFF);
+            // Create minimal empty chunk NBT — Minecraft will regenerate terrain
+            // when it sees Status="minecraft:empty"
+            CompoundTag emptyChunk = new CompoundTag();
+            emptyChunk.putInt("xPos", pos.x);
+            emptyChunk.putInt("zPos", pos.z);
+            emptyChunk.putString("Status", "minecraft:empty");
+            emptyChunk.putInt("DataVersion", 3839); // 1.21.1 data version
+            emptyChunk.put("sections", new ListTag());     // empty sections
+            emptyChunk.put("block_entities", new ListTag()); // no block entities
+            emptyChunk.put("block_ticks", new ListTag());
+            emptyChunk.put("fluid_ticks", new ListTag());
+            emptyChunk.put("entities", new ListTag());
+            emptyChunk.put("HeightMap", new CompoundTag()); // empty heightmap
 
-                if (sectorOffset == 0) {
-                    LOGGER.debug("Chunk {} has no data in region file", pos);
-                    return;
+            // Compress NBT with ZLib (compression type 2, standard for MC region files)
+            byte[] compressed;
+            try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                 DeflaterOutputStream deflater = new DeflaterOutputStream(baos, new Deflater(Deflater.DEFAULT_COMPRESSION));
+                 DataOutputStream dataOut = new DataOutputStream(deflater)) {
+                NbtIo.write(emptyChunk, dataOut);
+                dataOut.flush();
+                compressed = baos.toByteArray();
+            }
+
+            // Calculate required sectors (each sector = 4096 bytes)
+            // Entry format: [4 bytes length][1 byte compression][compressed bytes]
+            int entryLength = 1 + compressed.length; // 1 = compression type byte
+            int sectorCount = (entryLength + 4095) / 4096;
+            if (sectorCount < 1) sectorCount = 1;
+
+            try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(regionFile.toFile(), "rw")) {
+                // Read current header to find existing chunk
+                file.seek(chunkIndex * 4);
+                byte[] header = new byte[4];
+                file.read(header);
+                int currentSector = ((header[0] & 0xFF) << 16)
+                        | ((header[1] & 0xFF) << 8)
+                        | (header[2] & 0xFF);
+                int currentSectors = header[3] & 0xFF;
+
+                int writeSector;
+                if (currentSector > 0 && currentSectors >= sectorCount) {
+                    // Reuse existing space
+                    writeSector = currentSector;
+                } else {
+                    // Append to end of file, aligned to sector boundary
+                    long fileLen = file.length();
+                    writeSector = (int) ((fileLen + 4095) / 4096);
                 }
 
-                // Clear header entry (offset = 0, marking chunk as non-existent)
-                file.seek(chunkIndex * 4);
-                file.write(new byte[]{0, 0, 0, 0});
-                // Clear timestamp entry
-                file.seek(4096 + chunkIndex * 4);
-                file.write(new byte[]{0, 0, 0, 0});
+                // Write: [4 bytes entry length][1 byte compression type 2=ZLib][compressed NBT]
+                long writePos = (long) writeSector * 4096;
+                file.seek(writePos);
+                file.writeInt(entryLength);
+                file.writeByte(2); // ZLib compression
+                file.write(compressed);
 
-                LOGGER.debug("Cleared chunk {} from MCA file r.{}.{}.mca", pos, regionX, regionZ);
+                // Pad remaining sector space with zeros
+                long endPos = writePos + sectorCount * 4096L;
+                if (file.length() < endPos) {
+                    file.setLength(endPos);
+                }
+
+                // Update header
+                file.seek(chunkIndex * 4);
+                byte[] newHeader = new byte[]{
+                        (byte) ((writeSector >> 16) & 0xFF),
+                        (byte) ((writeSector >> 8) & 0xFF),
+                        (byte) (writeSector & 0xFF),
+                        (byte) sectorCount
+                };
+                file.write(newHeader);
+
+                // Update timestamp
+                file.seek(4096L + chunkIndex * 4);
+                file.writeInt((int) (System.currentTimeMillis() / 1000));
+
+                LOGGER.debug("Wrote empty chunk {} to MCA r.{}.{}.mca (sector={}, count={})",
+                        pos, regionX, regionZ, writeSector, sectorCount);
             }
         } catch (Exception e) {
-            LOGGER.warn("MCA manipulation failed for chunk {}: {}", pos, e.getMessage());
+            LOGGER.warn("Failed to write empty chunk data for {}: {}", pos, e.getMessage());
         }
     }
 
