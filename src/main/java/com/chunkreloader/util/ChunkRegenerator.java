@@ -73,8 +73,11 @@ public class ChunkRegenerator {
 
         LevelChunk existingChunk = level.getChunkSource().getChunkNow(pos.x, pos.z);
 
+        // Dump ChunkMap fields once for debugging
+        dumpChunkMapFields(level);
+
         // Clear MCA header on disk (marks chunk as non-existent)
-        clearChunkFromMcaFile(level, pos);
+        clearChunkViaStorage(level, pos);
 
         // Prevent old data from being saved back to the cleared MCA entry
         if (existingChunk != null) {
@@ -84,6 +87,40 @@ public class ChunkRegenerator {
 
         ChunkLoadTracker.get(level).removeRecord(pos);
         return true;
+    }
+
+    private static boolean dumpDone = false;
+
+    private static void dumpChunkMapFields(ServerLevel level) {
+        if (dumpDone) return;
+        dumpDone = true;
+        try {
+            var chunkMap = level.getChunkSource().chunkMap;
+            LOGGER.info("=== ChunkMap fields dump ===");
+            for (var f : chunkMap.getClass().getDeclaredFields()) {
+                f.setAccessible(true);
+                Object val = f.get(chunkMap);
+                LOGGER.info("Field: {} type={} value={}", f.getName(), f.getType().getName(),
+                        val != null ? val.getClass().getName() : "null");
+                // If it has any public methods, check for write/save
+                if (val != null) {
+                    for (var m : val.getClass().getMethods()) {
+                        if ("write".equals(m.getName()) || "save".equals(m.getName())) {
+                            LOGGER.info("  -> has method: {} ({})", m.getName(), m.getParameterCount());
+                        }
+                    }
+                }
+            }
+            LOGGER.info("=== End dump ===");
+        } catch (Exception e) {
+            LOGGER.warn("Dump failed: {}", e.getMessage());
+        }
+    }
+
+    private static void clearChunkViaStorage(ServerLevel level, ChunkPos pos) {
+        // For now, fall back to direct MCA file manipulation
+        // TODO: use ChunkStorage.write() via reflection once we know the field name
+        clearChunkFromMcaFile(level, pos);
     }
 
     private static void clearChunkFromMcaFile(ServerLevel level, ChunkPos pos) {
