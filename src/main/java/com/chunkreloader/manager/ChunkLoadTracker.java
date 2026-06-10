@@ -74,8 +74,8 @@ public class ChunkLoadTracker extends SavedData {
         return loadTimestamps.containsKey(ChunkPos.asLong(pos.x, pos.z));
     }
 
-    public void tick() {
-        if (!Config.getInstance().enableAutoReload.get()) {
+    public void tick(ServerLevel level) {
+        if (!Config.getInstance().getAutoReload(level)) {
             return;
         }
 
@@ -89,7 +89,7 @@ public class ChunkLoadTracker extends SavedData {
         tickCounter = 0;
 
         long now = System.currentTimeMillis();
-        long staleThreshold = now - (Config.getInstance().staleDays.get() * 86400000L); // days to millis
+        long staleThreshold = now - (Config.getInstance().getStaleDays(level) * 86400000L); // days to millis
 
         List<Long> toRemove = new ArrayList<>();
 
@@ -125,7 +125,7 @@ public class ChunkLoadTracker extends SavedData {
      * Called from the server thread.
      */
     public static void processStaleChunks(ServerLevel level) {
-        if (!Config.getInstance().enableAutoReload.get()) return;
+        if (!Config.getInstance().getAutoReload(level)) return;
 
         List<ChunkPos> batch = StaleChunkQueue.drainBatch(50); // Process up to 50 at a time
         if (batch.isEmpty()) return;

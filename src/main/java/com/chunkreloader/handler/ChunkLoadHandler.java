@@ -10,7 +10,7 @@ import net.minecraft.world.level.ChunkPos;
 public class ChunkLoadHandler {
 
     public static void onChunkLoad(ChunkLoadTracker tracker, ServerLevel level, ChunkPos pos) {
-        if (!Config.getInstance().enableAutoReload.get()) {
+        if (!Config.getInstance().getAutoReload(level)) {
             return;
         }
 

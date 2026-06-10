@@ -59,13 +59,19 @@ public class ChunkReloaderMod {
     }
 
     private void onServerTick(ServerTickEvent.Post event) {
-        if (tracker != null) {
-            tracker.tick();
-            // Process any queued stale chunks on the main server thread
-            var server = event.getServer();
-            if (server != null) {
-                ChunkLoadTracker.processStaleChunks(server.overworld());
-            }
+        var server = event.getServer();
+        if (server == null) return;
+
+        // Process each world's tracker
+        for (var key : server.levelKeys()) {
+            var level = server.getLevel(key);
+            if (level == null) continue;
+
+            var worldTracker = ChunkLoadTracker.get(level);
+            worldTracker.tick(level);
+
+            // Process any queued stale chunks
+            ChunkLoadTracker.processStaleChunks(level);
         }
     }
 }

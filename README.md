@@ -64,20 +64,23 @@
 
 | 选项 | 值类型 | 默认值 | 说明 |
 |------|--------|--------|------|
-| `enableAutoReload` | `true` / `false` | `false` | 开关自动重载 |
-| `staleDays` | 数字 | `14` | 区块过期天数 |
+| `enableAutoReload` | `<世界> true/false` | `overworld false` | 开关自动重载（按世界） |
+| `staleDays` | `<世界> 天数` | `overworld 14` | 区块过期天数（按世界） |
 | `nonRecordArea` | `<世界> <x1,z1,x2,z2>` | `overworld -50000,-50000,50000,50000` | 非记录区域（含世界名） |
 | `protectArea` | `<世界> <x1,z1,x2,z2>` | `overworld -50000,-50000,50000,50000` | 保护区域（含世界名） |
 | `autoReloadInterval` | 数字 | `3600` | 自动重载检查间隔（秒） |
 
 **示例**:
 ```
-/chunckreloader set enableAutoReload true
-/chunckreloader set staleDays 15
+/chunckreloader set enableAutoReload overworld true
+/chunckreloader set staleDays overworld 14
+/chunckreloader set staleDays the_end 30
 /chunckreloader set nonRecordArea overworld -1000,-1000,1000,1000
 /chunckreloader set protectArea the_end 0,0,500,500
 /chunckreloader set autoReloadInterval 600
 ```
+
+> **注意**: `enableAutoReload` 和 `staleDays` 现在也按世界配置，需要指定世界名。世界名错误会提示 `Wrong world name`。
 
 ### `/chunckreloader status`
 
@@ -102,15 +105,15 @@
 
 ```toml
 [general]
-    # 是否开启自动重载
-    enableAutoReload = false
+    # 是否开启自动重载 (格式: "world:true" 或 "world:false")
+    enableAutoReload = "overworld:false"
     
     # 非记录区域（格式: "world:x1,z1,x2,z2" 区块坐标）
     # 在此区域内的区块不会被追踪加载时间
     nonRecordArea = "overworld:-50000,-50000,50000,50000"
     
-    # 过期天数 - 超过此天数未加载的区块将被自动重载
-    staleDays = 14
+    # 过期天数 (格式: "world:天数")
+    staleDays = "overworld:14"
     
     # 保护区域（格式: "world:x1,z1,x2,z2" 区块坐标）
     # 默认与非记录区域相同
@@ -124,9 +127,9 @@
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `enableAutoReload` | `false` | 开启后自动检测并重载过期区块 |
+| `enableAutoReload` | `overworld:false` | 开启后自动检测并重载过期区块（按世界） |
 | `nonRecordArea` | `overworld:-50000,-50000,50000,50000` | 默认主世界出生点周围大范围不追踪，避免误重载玩家活动区域 |
-| `staleDays` | `14` | 区块超过 14 天未被任何玩家加载，将被视为过期 |
+| `staleDays` | `overworld:14` | 区块超过 14 天未加载将被重载（按世界） |
 | `protectArea` | `overworld:-50000,-50000,50000,50000` | 保护区域（与非记录区域默认相同） |
 | `autoReloadInterval` | `3600` | 每 3600 秒（1 小时）检查一次过期区块 |
 

@@ -150,22 +150,29 @@ public class ChunkReloaderCommand {
         try {
             switch (option.toLowerCase()) {
                 case "enableautoreload":
-                case "enable_auto_reload":
-                    boolean autoReload = Boolean.parseBoolean(args);
-                    Config.getInstance().enableAutoReload.set(autoReload);
-                    source.sendSuccess(() -> Component.literal("§a[ChunkReloader] enableAutoReload set to §e" + autoReload), true);
+                case "enable_auto_reload": {
+                    // format: <world> <true/false>
+                    var wv = parseWorldValue(server, args);
+                    if (wv == null) return 0;
+                    Config.getInstance().setAutoReload(wv.worldName, Boolean.parseBoolean(wv.value));
+                    source.sendSuccess(() -> Component.literal("§a[ChunkReloader] enableAutoReload set to §e" + wv.value + "§a for world §e" + wv.worldName), true);
                     break;
+                }
 
                 case "staledays":
-                case "stale_days":
-                    int days = Integer.parseInt(args);
+                case "stale_days": {
+                    // format: <world> <days>
+                    var wv = parseWorldValue(server, args);
+                    if (wv == null) return 0;
+                    int days = Integer.parseInt(wv.value);
                     if (days < 1) {
                         source.sendFailure(Component.literal("staleDays must be >= 1"));
                         return 0;
                     }
-                    Config.getInstance().staleDays.set(days);
-                    source.sendSuccess(() -> Component.literal("§a[ChunkReloader] staleDays set to §e" + days), true);
+                    Config.getInstance().setStaleDays(wv.worldName, days);
+                    source.sendSuccess(() -> Component.literal("§a[ChunkReloader] staleDays set to §e" + days + "§a days for world §e" + wv.worldName), true);
                     break;
+                }
 
                 case "nonrecordarea":
                 case "non_record_area": {
@@ -219,6 +226,25 @@ public class ChunkReloaderCommand {
     }
 
     /**
+     * 解析 <world> <value> 格式，返回 (worldName, value) 或 null
+     */
+    private static record WorldValue(String worldName, String value) {}
+
+    private static WorldValue parseWorldValue(net.minecraft.server.MinecraftServer server, String args) {
+        String[] parts = args.split(" ", 2);
+        if (parts.length < 2) {
+            throw new IllegalArgumentException("Format: <world> <value>. Use /chunckreloader get worldName to list worlds.");
+        }
+        String worldName = parts[0].trim();
+        String value = parts[1].trim();
+
+        if (!AreaParser.isValidWorld(server, worldName)) {
+            throw new IllegalArgumentException("Wrong world name: " + worldName + ". Use /chunckreloader get worldName to list valid worlds.");
+        }
+        return new WorldValue(worldName, value);
+    }
+
+    /**
      * Build area string with world prefix.
      * Input format: <world> <x1,z1,x2,z2>
      * Output format: <world>:<x1>,<z1>,<x2>,<z2>
@@ -263,7 +289,7 @@ public class ChunkReloaderCommand {
         var config = Config.getInstance();
 
         source.sendSuccess(() -> Component.literal("§6=== ChunkReloader Status ==="), false);
-        source.sendSuccess(() -> Component.literal("§eAuto Reload: " + (config.enableAutoReload.get() ? "§aON" : "§cOFF")), false);
+        source.sendSuccess(() -> Component.literal("§eAuto Reload: §f" + config.enableAutoReload.get()), false);
         source.sendSuccess(() -> Component.literal("§eStale Days: §f" + config.staleDays.get()), false);
         source.sendSuccess(() -> Component.literal("§eNon-Record Area: §f" + config.nonRecordArea.get()), false);
         source.sendSuccess(() -> Component.literal("§eProtect Area: §f" + (config.protectArea.get().isEmpty() ? "(none)" : config.protectArea.get())), false);
