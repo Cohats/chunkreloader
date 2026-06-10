@@ -4,10 +4,12 @@
 
 ## 功能
 
-- **`/reload_area`** 命令 - 手动重载指定范围的区块
+- **`/chunckreloader reload`** - 手动重载指定范围的区块
+- **`/chunckreloader set`** - 游戏内直接修改配置，无需编辑文件
+- **`/chunckreloader status`** - 查看当前配置和运行状态
 - **自动重载** - 自动检测并重载超过指定天数未加载的区块
 - **领地保护** - 支持 GriefDefender 保护区检测（软依赖）
-- **配置文件** - 所有功能均可通过配置文件调整
+- **配置文件** - 所有功能均可通过配置文件或命令调整
 
 ## 安装
 
@@ -17,7 +19,9 @@
 
 ## 命令
 
-### `/reload_area <x1> <z1> <x2> <z2> [force]`
+所有命令需要 **OP 权限**（权限等级 2）。
+
+### `/chunckreloader reload <x1> <z1> <x2> <z2> [force]`
 
 重载指定矩形区域内的所有区块（区块坐标）。
 
@@ -27,15 +31,43 @@
 | `x2`, `z2` | 第二个区块坐标 |
 | `force` | 可选，添加此参数忽略保护区域强制重载 |
 
-**权限**: 需要 OP 权限（权限等级 2）
-
 **示例**:
 ```
-/reload_area -10 -10 10 10
-/reload_area 0 0 100 100 force
+/chunckreloader reload -10 -10 10 10
+/chunckreloader reload 0 0 100 100 force
 ```
 
 > **提示**: 命令使用的是**区块坐标**，不是方块坐标。区块坐标 = 方块坐标 ÷ 16（向下取整）。
+
+### `/chunckreloader set <选项> <值>`
+
+游戏内直接修改配置，立即生效。
+
+| 选项 | 值类型 | 说明 |
+|------|--------|------|
+| `enableAutoReload` | `true` / `false` | 开关自动重载 |
+| `staleDays` | 数字 | 区块过期天数 |
+| `nonRecordArea` | `x1,z1,x2,z2` | 非记录区域（方块坐标） |
+| `protectArea` | `x1,z1,x2,z2` | 保护区域（方块坐标），留空表示不使用 |
+| `autoReloadInterval` | 数字 | 自动重载检查间隔（秒） |
+
+**示例**:
+```
+/chunckreloader set enableAutoReload true
+/chunckreloader set staleDays 15
+/chunckreloader set nonRecordArea -1000,-1000,1000,1000
+/chunckreloader set protectArea 100,100,200,200
+/chunckreloader set autoReloadInterval 600
+```
+
+### `/chunckreloader status`
+
+显示当前所有配置值和运行状态。
+
+**示例**:
+```
+/chunckreloader status
+```
 
 ### 工作原理
 
@@ -46,6 +78,8 @@
 ## 配置文件
 
 路径: `config/chunkreloader-common.toml`
+
+也可以通过 `/chunckreloader set` 命令在游戏内修改，无需编辑文件。
 
 ```toml
 [general]
@@ -64,7 +98,7 @@
     # 留空表示不使用
     protectArea = ""
     
-    # 自动重载检查间隔（秒），0 = 每个游戏刻检查，最小 60
+    # 自动重载检查间隔（秒），0 = 每个游戏刻检查
     autoReloadInterval = 300
 ```
 
@@ -84,9 +118,9 @@
 
 如果服务端安装了 GriefDefender（领地插件），本模组会自动检测并跳过被领地保护的区块，防止误重载。
 
-### 配置文件保护区
+### 命令设置保护区
 
-你也可以在配置文件中设置 `protectArea` 来手动指定保护区域，格式为 `x1,z1,x2,z2`（方块坐标）。
+也可以通过 `/chunckreloader set protectArea x1,z1,x2,z2` 在游戏内设置。
 
 ## 兼容性
 
