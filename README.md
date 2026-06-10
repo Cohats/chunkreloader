@@ -4,11 +4,12 @@
 
 ## 功能
 
-- **`/chunckreloader reload`** - 手动重载指定范围的区块
+- **`/chunckreloader reload`** - 手动重载指定世界的指定范围区块
 - **`/chunckreloader set`** - 游戏内直接修改配置，无需编辑文件
+- **`/chunckreloader get worldName`** - 获取所有可用世界名称列表
 - **`/chunckreloader status`** - 查看当前配置和运行状态
 - **自动重载** - 自动检测并重载超过指定天数未加载的区块
-- **领地保护** - 支持 GriefDefender 保护区检测（软依赖）
+- **领地保护** - 支持 GriefDefender / FTB Chunks / OPAC（软依赖）
 - **配置文件** - 所有功能均可通过配置文件或命令调整
 
 ## 安装
@@ -21,23 +22,41 @@
 
 所有命令需要 **OP 权限**（权限等级 2）。
 
-### `/chunckreloader reload <x1> <z1> <x2> <z2> [force]`
+### `/chunckreloader get worldName`
 
-重载指定矩形区域内的所有区块（区块坐标）。
+获取所有可用世界名称列表，包含玩家数量。
+
+**示例**:
+```
+/chunckreloader get worldName
+```
+输出:
+```
+=== Available Worlds ===
+- minecraft:overworld (3 players)
+- minecraft:the_nether (0 players)
+- minecraft:the_end (0 players)
+```
+
+### `/chunckreloader reload <世界> <x1> <z1> <x2> <z2> [force]`
+
+重载指定世界中矩形区域内的所有区块（区块坐标）。
 
 | 参数 | 说明 |
 |------|------|
+| `世界` | 世界名称（如 `overworld`、`the_nether`、`the_end`），用 `/chunckreloader get worldName` 查看 |
 | `x1`, `z1` | 第一个区块坐标 |
 | `x2`, `z2` | 第二个区块坐标 |
 | `force` | 可选，添加此参数忽略保护区域强制重载 |
 
 **示例**:
 ```
-/chunckreloader reload -10 -10 10 10
-/chunckreloader reload 0 0 100 100 force
+/chunckreloader reload overworld -10 -10 10 10
+/chunckreloader reload the_nether 0 0 50 50
+/chunckreloader reload the_end 0 0 100 100 force
 ```
 
-> **提示**: 命令使用的是**区块坐标**，不是方块坐标。区块坐标 = 方块坐标 ÷ 16（向下取整）。
+> **提示**: 如果世界名错误会提示 `Wrong world name`。区块坐标 = 方块坐标 ÷ 16（向下取整）。
 
 ### `/chunckreloader set <选项> <值>`
 
@@ -47,16 +66,16 @@
 |------|--------|--------|------|
 | `enableAutoReload` | `true` / `false` | `false` | 开关自动重载 |
 | `staleDays` | 数字 | `14` | 区块过期天数 |
-| `nonRecordArea` | `x1,z1,x2,z2` | `-50000,-50000,50000,50000` | 非记录区域（方块坐标） |
-| `protectArea` | `x1,z1,x2,z2` | `-50000,-50000,50000,50000` | 保护区域（方块坐标） |
+| `nonRecordArea` | `<世界> <x1,z1,x2,z2>` | `overworld -50000,-50000,50000,50000` | 非记录区域（含世界名） |
+| `protectArea` | `<世界> <x1,z1,x2,z2>` | `overworld -50000,-50000,50000,50000` | 保护区域（含世界名） |
 | `autoReloadInterval` | 数字 | `3600` | 自动重载检查间隔（秒） |
 
 **示例**:
 ```
 /chunckreloader set enableAutoReload true
 /chunckreloader set staleDays 15
-/chunckreloader set nonRecordArea -1000,-1000,1000,1000
-/chunckreloader set protectArea 100,100,200,200
+/chunckreloader set nonRecordArea overworld -1000,-1000,1000,1000
+/chunckreloader set protectArea the_end 0,0,500,500
 /chunckreloader set autoReloadInterval 600
 ```
 
@@ -86,16 +105,16 @@
     # 是否开启自动重载
     enableAutoReload = false
     
-    # 非记录区域（格式: x1,z1,x2,z2 方块坐标）
+    # 非记录区域（格式: "world:x1,z1,x2,z2" 区块坐标）
     # 在此区域内的区块不会被追踪加载时间
-    nonRecordArea = "-50000,-50000,50000,50000"
+    nonRecordArea = "overworld:-50000,-50000,50000,50000"
     
     # 过期天数 - 超过此天数未加载的区块将被自动重载
     staleDays = 14
     
-    # 保护区域（格式: x1,z1,x2,z2 方块坐标）
+    # 保护区域（格式: "world:x1,z1,x2,z2" 区块坐标）
     # 默认与非记录区域相同
-    protectArea = "-50000,-50000,50000,50000"
+    protectArea = "overworld:-50000,-50000,50000,50000"
     
     # 自动重载检查间隔（秒），0 = 每个游戏刻检查
     autoReloadInterval = 3600
@@ -106,9 +125,9 @@
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
 | `enableAutoReload` | `false` | 开启后自动检测并重载过期区块 |
-| `nonRecordArea` | `-50000,-50000,50000,50000` | 默认世界出生点周围大范围不追踪，避免误重载玩家活动区域 |
+| `nonRecordArea` | `overworld:-50000,-50000,50000,50000` | 默认主世界出生点周围大范围不追踪，避免误重载玩家活动区域 |
 | `staleDays` | `14` | 区块超过 14 天未被任何玩家加载，将被视为过期 |
-| `protectArea` | `-50000,-50000,50000,50000` | 保护区域（与非记录区域默认相同） |
+| `protectArea` | `overworld:-50000,-50000,50000,50000` | 保护区域（与非记录区域默认相同） |
 | `autoReloadInterval` | `3600` | 每 3600 秒（1 小时）检查一次过期区块 |
 
 ## 保护区
@@ -126,7 +145,8 @@
 
 ### 命令设置保护区
 
-也可以通过 `/chunckreloader set protectArea x1,z1,x2,z2` 在游戏内设置。
+也可以通过 `/chunckreloader set protectArea <世界> <x1,z1,x2,z2>` 在游戏内设置。
+世界名错误会提示 `Wrong world name`。
 
 ## 兼容性
 
