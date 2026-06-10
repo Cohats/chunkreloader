@@ -47,6 +47,11 @@ public class ChunkRegenerator {
                     continue;
                 }
 
+                if (hasPlayersInChunk(level, pos)) {
+                    skipped++;
+                    continue;
+                }
+
                 try {
                     if (regenerateSingleChunk(level, pos)) {
                         regen++;
@@ -75,6 +80,11 @@ public class ChunkRegenerator {
                 continue;
             }
 
+            if (hasPlayersInChunk(level, pos)) {
+                skipped++;
+                continue;
+            }
+
             try {
                 if (regenerateSingleChunk(level, pos)) {
                     regen++;
@@ -88,6 +98,22 @@ public class ChunkRegenerator {
         }
 
         return new long[]{regen, skipped, failed};
+    }
+
+    /**
+     * Check if any player is inside this chunk.
+     */
+    private static boolean hasPlayersInChunk(ServerLevel level, ChunkPos pos) {
+        int minBlockX = pos.getMinBlockX();
+        int minBlockZ = pos.getMinBlockZ();
+        int maxBlockX = pos.getMaxBlockX();
+        int maxBlockZ = pos.getMaxBlockZ();
+
+        return level.players().stream().anyMatch(player -> {
+            double px = player.getX();
+            double pz = player.getZ();
+            return px >= minBlockX && px <= maxBlockX && pz >= minBlockZ && pz <= maxBlockZ;
+        });
     }
 
     /**
