@@ -192,8 +192,9 @@ public class ChunkReloaderCommand {
             return 0;
         }
 
-        ChunkPos pos1 = new ChunkPos(x1, z1);
-        ChunkPos pos2 = new ChunkPos(x2, z2);
+        // Convert block coordinates to chunk coordinates (>> 4 = divide by 16, floor)
+        ChunkPos pos1 = new ChunkPos(x1 >> 4, z1 >> 4);
+        ChunkPos pos2 = new ChunkPos(x2 >> 4, z2 >> 4);
 
         int minX = Math.min(pos1.x, pos2.x);
         int maxX = Math.max(pos1.x, pos2.x);

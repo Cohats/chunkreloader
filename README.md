@@ -43,13 +43,13 @@
 
 ### `/chunckreloader reload <世界> <x1> <z1> <x2> <z2> [force]`
 
-重载指定世界中矩形区域内的所有区块（区块坐标）。
+重载指定世界中矩形区域内的所有区块（输入方块坐标，自动转换为区块坐标）。
 
 | 参数 | 说明 |
 |------|------|
 | `世界` | 世界名称（如 `overworld`、`the_nether`、`the_end`），用 `/chunckreloader get worldName` 查看 |
-| `x1`, `z1` | 第一个区块坐标 |
-| `x2`, `z2` | 第二个区块坐标 |
+| `x1`, `z1` | 第一个点的方块坐标 |
+| `x2`, `z2` | 第二个点的方块坐标 |
 | `force` | 可选，添加此参数忽略保护区域和玩家更新检测，强制重载所有区块 |
 
 **默认行为（不加 force）**:
@@ -63,12 +63,12 @@
 
 **示例**:
 ```
-/chunckreloader reload overworld -10 -10 10 10
-/chunckreloader reload the_nether 0 0 50 50
-/chunckreloader reload the_end 0 0 100 100 force
+/chunckreloader reload overworld -160 -160 160 160
+/chunckreloader reload the_nether 0 0 800 800
+/chunckreloader reload the_end 0 0 1600 1600 force
 ```
 
-> **提示**: 如果世界名错误会提示 `Wrong world name`。区块坐标 = 方块坐标 ÷ 16（向下取整）。
+> **提示**: 输入的是**方块坐标**（F3 调试界面上的坐标），模组会自动除 16 向下取整转成区块坐标。如果世界名错误会提示 `Wrong world name`。
 
 ### `/chunckreloader reload <世界> all [force]`
 
