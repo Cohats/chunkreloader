@@ -3,7 +3,6 @@ package com.chunkreloader.util;
 import com.chunkreloader.ChunkReloaderMod;
 import com.chunkreloader.manager.ChunkLoadTracker;
 import com.chunkreloader.manager.ProtectedChunkManager;
-import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerChunkCache;
@@ -18,7 +17,6 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
-import java.util.Map;
 
 public class ChunkRegenerator {
     private static final Logger LOGGER = LoggerFactory.getLogger("ChunkReloaderRegen");
@@ -28,9 +26,6 @@ public class ChunkRegenerator {
     private static Method storageWriteMethod;
     private static Field storageField;
     private static boolean storageResolved = false;
-
-    private static Field visibleChunkMapField;
-    private static boolean chunkMapResolved = false;
 
     /**
      * Regenerate all chunks in the rectangle between pos1 and pos2.
@@ -122,102 +117,37 @@ public class ChunkRegenerator {
     }
 
     /**
-     * Regenerate a single chunk by clearing both disk (MCA) and memory.
+     * Regenerate a single chunk by clearing disk (MCA) data.
      *
-     * 1. Clear MCA header on disk — so future loads regenerate fresh terrain
-     * 2. If chunk is loaded in memory, clear all blocks to air
-     * 3. Try to drop the chunk from ChunkMap so it reloads from (cleared) disk
-     * 4. Call level.getChunk() to trigger load/generation
+     * If chunk is loaded in memory and has players → skip (safety).
+     * Otherwise: clear MCA on disk so future loads regenerate fresh terrain.
+     * If loaded in memory, also mark as unsaved=false + clear to air
+     * so the old data is not persisted when the chunk naturally unloads.
      */
     private static boolean regenerateSingleChunk(ServerLevel level, ChunkPos pos) {
-        LevelChunk existingChunk = level.getChunkSource().getChunkNow(pos.x, pos.z);
-        boolean wasLoaded = existingChunk != null;
+        // Safety: skip if any player is in this chunk
+        if (hasPlayersInChunk(level, pos)) {
+            LOGGER.warn("Skipping chunk {} — player is inside", pos);
+            return false;
+        }
 
-        // Step 1: Clear from disk (MCA file or storage write)
+        LevelChunk existingChunk = level.getChunkSource().getChunkNow(pos.x, pos.z);
+
+        // Clear from disk (MCA file or storage write)
         clearChunkFromDisk(level, pos);
 
-        // Step 2: If chunk is loaded in memory, clear it directly
-        if (wasLoaded) {
-            LOGGER.debug("Chunk {} is in memory, clearing blocks to air", pos);
+        // If chunk is loaded in memory, prevent it from saving old data
+        // and clear blocks for immediate visual effect
+        if (existingChunk != null) {
+            // Mark as not-unsaved so the server won't persist the old data
+            existingChunk.setUnsaved(false);
+            // Clear blocks to air so the player sees immediate change
             fallbackClearChunk(level, pos);
-        }
-
-        // Step 3: Try to drop from ChunkMap so next getChunk() actually loads from disk
-        if (wasLoaded) {
-            try {
-                forceUnloadChunk(level, pos);
-            } catch (Exception e) {
-                LOGGER.debug("Could not force-unload chunk {}: {}", pos, e.getMessage());
-            }
-        }
-
-        // Step 4: Trigger chunk load — if unloaded, this reads cleared MCA and regenerates
-        try {
-            level.getChunk(pos.x, pos.z);
-        } catch (Exception e) {
-            LOGGER.warn("Could not reload chunk {}: {}", pos, e.getMessage());
+            LOGGER.debug("Cleared in-memory chunk {} (unsaved={})", pos, existingChunk.isUnsaved());
         }
 
         ChunkLoadTracker.get(level).removeRecord(pos);
         return true;
-    }
-
-    /**
-     * Try to force-unload a chunk from the ChunkMap's internal structures.
-     * Uses reflection to find and remove the chunk from visibleChunkMap.
-     */
-    private static void forceUnloadChunk(ServerLevel level, ChunkPos pos) throws Exception {
-        ServerChunkCache cache = level.getChunkSource();
-        ChunkMap chunkMap = cache.chunkMap;
-
-        if (!chunkMapResolved) {
-            resolveChunkMap(chunkMap);
-        }
-
-        long packedPos = ChunkPos.asLong(pos.x, pos.z);
-
-        if (visibleChunkMapField != null) {
-            Object map = visibleChunkMapField.get(chunkMap);
-            if (map instanceof Long2ObjectMap<?> longMap) {
-                longMap.remove(packedPos);
-                LOGGER.debug("Removed chunk {} from visibleChunkMap", pos);
-            } else if (map instanceof Map<?, ?> genericMap) {
-                ((Map<Long, ?>) genericMap).remove(packedPos);
-                LOGGER.debug("Removed chunk {} from chunk map", pos);
-            }
-        }
-    }
-
-    /**
-     * Find the internal chunk map field (visibleChunkMap or similar) in ChunkMap.
-     */
-    private static void resolveChunkMap(ChunkMap chunkMap) {
-        chunkMapResolved = true;
-
-        // Look for Long2ObjectMap fields (ChunkMap uses these internally)
-        for (Field field : chunkMap.getClass().getDeclaredFields()) {
-            Class<?> type = field.getType();
-            // Look for maps from long -> LevelChunk
-            if (Long2ObjectMap.class.isAssignableFrom(type)) {
-                field.setAccessible(true);
-                visibleChunkMapField = field;
-                LOGGER.info("Found chunk map field: {} ({})", field.getName(), type.getSimpleName());
-                return;
-            }
-        }
-
-        // Fallback: look for Map<Long, ?> fields
-        for (Field field : chunkMap.getClass().getDeclaredFields()) {
-            if (Map.class.isAssignableFrom(field.getType())) {
-                String typeName = field.getGenericType().getTypeName();
-                if (typeName.contains("Long") && (typeName.contains("Chunk") || typeName.contains("chunk"))) {
-                    field.setAccessible(true);
-                    visibleChunkMapField = field;
-                    LOGGER.info("Found chunk map field (fallback): {} ({})", field.getName(), typeName);
-                    return;
-                }
-            }
-        }
     }
 
     /**
