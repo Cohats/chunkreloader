@@ -8,14 +8,13 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
 
 public class ChunkRegenerator {
-    private static final Logger LOGGER = LoggerFactory.getLogger("ChunkReloaderRegen");
+    private static final Logger LOGGER = ChunkReloaderMod.LOGGER;
 
     // Reflective storage handles
     private static Object storageInstance;
@@ -99,13 +98,13 @@ public class ChunkRegenerator {
     private static void clearChunkFromDisk(ServerLevel level, ChunkPos pos) {
         // Method 1: Write empty NBT via ChunkStorage reflection (uses correct path automatically)
         if (tryStorageWrite(level, pos)) {
-            LOGGER.debug("Cleared chunk {} via storage write", pos);
+            LOGGER.info("Cleared chunk {} via storage write", pos);
             return;
         }
 
         // Method 2: Direct MCA file manipulation with auto-detected path
         if (clearChunkFromMcaFile(level, pos)) {
-            LOGGER.debug("Deleted chunk {} from MCA file", pos);
+            LOGGER.info("Deleted chunk {} from MCA file", pos);
             return;
         }
 
@@ -136,7 +135,7 @@ public class ChunkRegenerator {
                 return true;
             }
         } catch (Exception e) {
-            LOGGER.debug("Storage write failed: {}", e.getMessage());
+            LOGGER.info("Storage write failed: {}", e.getMessage());
         }
         return false;
     }
@@ -209,14 +208,14 @@ public class ChunkRegenerator {
             file.read(header);
             int sectorOffset = ((header[0] & 0xFF) << 16) | ((header[1] & 0xFF) << 8) | (header[2] & 0xFF);
             if (sectorOffset == 0) {
-                LOGGER.debug("Chunk {} already deleted from MCA", pos);
+                LOGGER.info("Chunk {} already deleted from MCA", pos);
                 return true;
             }
             file.seek(chunkIndex * 4);
             file.write(new byte[]{0, 0, 0, 0});
             file.seek(4096L + chunkIndex * 4);
             file.write(new byte[]{0, 0, 0, 0});
-            LOGGER.debug("Deleted chunk {} from MCA", pos);
+            LOGGER.info("Deleted chunk {} from MCA", pos);
             return true;
         } catch (Exception e) {
             LOGGER.warn("MCA manipulation failed: {}", e.getMessage());
@@ -284,7 +283,7 @@ public class ChunkRegenerator {
                 if (p == null) continue;
                 java.nio.file.Path test = p.resolve(filename);
                 if (java.nio.file.Files.exists(test)) {
-                    LOGGER.debug("Found region file: {}", test);
+                    LOGGER.info("Found region file: {}", test);
                     return test;
                 }
             }
@@ -292,7 +291,7 @@ public class ChunkRegenerator {
             LOGGER.warn("Region file {} not found in any path for dim={}", filename, dimPath);
             // Debug: print paths we checked
             for (java.nio.file.Path p : paths) {
-                if (p != null) LOGGER.debug("  Checked: {}", p.resolve(filename));
+                if (p != null) LOGGER.info("  Checked: {}", p.resolve(filename));
             }
         } catch (Exception e) {
             LOGGER.warn("Error finding region file: {}", e.getMessage());
@@ -317,7 +316,7 @@ public class ChunkRegenerator {
                 }
             }
         } catch (Exception e) {
-            LOGGER.debug("Save-reflect failed for {}: {}", pos, e.getMessage());
+            LOGGER.info("Save-reflect failed for {}: {}", pos, e.getMessage());
         }
         chunk.setUnsaved(false);
     }
