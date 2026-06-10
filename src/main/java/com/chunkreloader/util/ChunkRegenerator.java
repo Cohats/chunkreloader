@@ -104,17 +104,12 @@ public class ChunkRegenerator {
     }
 
     /**
-     * Delete a chunk from disk entirely (MCA header set to 0).
+     * Delete a chunk from disk (MCA header set to 0) and try to unload it
+     * from memory so the next access generates fresh terrain.
      *
-     * When the chunk is loaded next (player walks near), Minecraft finds no data
-     * on disk and generates brand-new terrain from scratch.
-     *
-     * If the chunk is currently in memory, mark unsaved=false so the server
-     * does NOT persist the old data back to the (now-deleted) MCA entry.
-     * No blocks are modified in memory — the player sees no immediate change.
+     * Safety: skips if any player is inside the chunk.
      */
     private static boolean regenerateSingleChunk(ServerLevel level, ChunkPos pos) {
-        // Safety: skip if any player is in this chunk
         if (hasPlayersInChunk(level, pos)) {
             LOGGER.warn("Skipping chunk {} — player is inside", pos);
             return false;
@@ -122,17 +117,46 @@ public class ChunkRegenerator {
 
         LevelChunk existingChunk = level.getChunkSource().getChunkNow(pos.x, pos.z);
 
-        // Delete chunk data from disk by clearing the MCA header entry
+        // Step 1: Delete from disk (MCA header = 0)
         clearChunkFromDisk(level, pos);
 
-        // If chunk is loaded in memory, prevent the old data from being saved back
+        // Step 2: Try to unload from memory so it's immediately gone
         if (existingChunk != null) {
-            existingChunk.setUnsaved(false);
-            LOGGER.debug("Chunk {} in memory, marked unsaved=false", pos);
+            tryForceUnload(level, pos, existingChunk);
         }
 
         ChunkLoadTracker.get(level).removeRecord(pos);
         return true;
+    }
+
+    /**
+     * Try to save the chunk, re-clear MCA, and mark unsaved=false.
+     * This gives ChunkMap a chance to cleanly unload the chunk on next tick.
+     * If reflection save fails, falls back to natural unload (safe).
+     */
+    private static void tryForceUnload(ServerLevel level, ChunkPos pos, LevelChunk chunk) {
+        try {
+            // Access ChunkMap via AT (public net.minecraft.server.level.ServerChunkCache chunkMap)
+            var chunkMap = level.getChunkSource().chunkMap;
+
+            // Find a save method via reflection (method name varies by MC version)
+            for (var m : chunkMap.getClass().getDeclaredMethods()) {
+                if (!"save".equals(m.getName())) continue;
+                Class<?>[] params = m.getParameterTypes();
+                if (params.length == 1 && params[0].isInstance(chunk)) {
+                    m.setAccessible(true);
+                    m.invoke(chunkMap, chunk);
+
+                    // Save wrote old data to MCA — re-clear so it's gone from disk
+                    clearChunkFromDisk(level, pos);
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.debug("Save-reflect failed for {}: {} (safe fallback)", pos, e.getMessage());
+        }
+
+        chunk.setUnsaved(false);
     }
 
     /**
