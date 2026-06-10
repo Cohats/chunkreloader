@@ -38,15 +38,15 @@ public class Config {
 
         staleDays = builder
                 .comment("Number of days after which a chunk is considered stale and will be regenerated")
-                .defineInRange("staleDays", 30, 1, Integer.MAX_VALUE);
+                .defineInRange("staleDays", 14, 1, Integer.MAX_VALUE);
 
         protectArea = builder
-                .comment("Protected area where chunks will NOT be regenerated. Format: x1,z1,x2,z2 (block coordinates). Leave empty to disable.")
-                .define("protectArea", "");
+                .comment("Protected area where chunks will NOT be regenerated. Format: x1,z1,x2,z2 (block coordinates). Matches nonRecordArea by default.")
+                .define("protectArea", "-50000,-50000,50000,50000");
 
         autoReloadInterval = builder
-                .comment("Interval in seconds between auto-reload checks (0 = every server tick, minimum 60)")
-                .defineInRange("autoReloadInterval", 300, 0, 86400);
+                .comment("Interval in seconds between auto-reload checks (0 = every server tick)")
+                .defineInRange("autoReloadInterval", 3600, 0, 86400);
 
         builder.pop();
     }
