@@ -1,6 +1,7 @@
 package com.chunkreloader.manager;
 
 import com.chunkreloader.config.Config;
+import com.chunkreloader.util.AreaParser;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import org.slf4j.Logger;
@@ -19,7 +20,7 @@ public class ProtectedChunkManager {
      */
     public static boolean isProtected(ServerLevel level, ChunkPos pos) {
         // 1. Config-based protection area
-        if (isInProtectArea(pos)) {
+        if (isInProtectArea(level, pos)) {
             return true;
         }
 
@@ -43,35 +44,17 @@ public class ProtectedChunkManager {
 
     // ---- Config-based protection ----
 
-    private static boolean isInProtectArea(ChunkPos pos) {
+    private static boolean isInProtectArea(ServerLevel level, ChunkPos pos) {
         String areaStr = Config.getInstance().protectArea.get();
         if (areaStr == null || areaStr.isEmpty()) {
             return false;
         }
 
-        try {
-            String[] parts = areaStr.split(",");
-            if (parts.length != 4) return false;
+        var areaOpt = AreaParser.parse(areaStr);
+        if (areaOpt.isEmpty()) return false;
 
-            int bx1 = Integer.parseInt(parts[0].trim());
-            int bz1 = Integer.parseInt(parts[1].trim());
-            int bx2 = Integer.parseInt(parts[2].trim());
-            int bz2 = Integer.parseInt(parts[3].trim());
-
-            int cx1 = bx1 >> 4;
-            int cz1 = bz1 >> 4;
-            int cx2 = bx2 >> 4;
-            int cz2 = bz2 >> 4;
-
-            int minX = Math.min(cx1, cx2);
-            int maxX = Math.max(cx1, cx2);
-            int minZ = Math.min(cz1, cz2);
-            int maxZ = Math.max(cz1, cz2);
-
-            return pos.x >= minX && pos.x <= maxX && pos.z >= minZ && pos.z <= maxZ;
-        } catch (NumberFormatException e) {
-            return false;
-        }
+        var area = areaOpt.get();
+        return area.matchesWorld(level) && area.containsChunk(pos);
     }
 
     // ---- GriefDefender ----

@@ -33,16 +33,16 @@ public class Config {
                 .define("enableAutoReload", false);
 
         nonRecordArea = builder
-                .comment("Area where chunks are NOT tracked for stale detection. Format: x1,z1,x2,z2 (block coordinates)")
-                .define("nonRecordArea", "-50000,-50000,50000,50000");
+                .comment("Area where chunks are NOT tracked for stale detection. Format: [world:]x1,z1,x2,z2 (block coordinates, optional world prefix). Default applies to overworld.")
+                .define("nonRecordArea", "overworld:-50000,-50000,50000,50000");
 
         staleDays = builder
                 .comment("Number of days after which a chunk is considered stale and will be regenerated")
                 .defineInRange("staleDays", 14, 1, Integer.MAX_VALUE);
 
         protectArea = builder
-                .comment("Protected area where chunks will NOT be regenerated. Format: x1,z1,x2,z2 (block coordinates). Matches nonRecordArea by default.")
-                .define("protectArea", "-50000,-50000,50000,50000");
+                .comment("Protected area where chunks will NOT be regenerated. Format: [world:]x1,z1,x2,z2 (block coordinates, optional world prefix).")
+                .define("protectArea", "overworld:-50000,-50000,50000,50000");
 
         autoReloadInterval = builder
                 .comment("Interval in seconds between auto-reload checks (0 = every server tick)")

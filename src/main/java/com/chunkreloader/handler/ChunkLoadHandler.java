@@ -3,6 +3,7 @@ package com.chunkreloader.handler;
 import com.chunkreloader.config.Config;
 import com.chunkreloader.manager.ChunkLoadTracker;
 import com.chunkreloader.manager.ProtectedChunkManager;
+import com.chunkreloader.util.AreaParser;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 
@@ -13,12 +14,12 @@ public class ChunkLoadHandler {
             return;
         }
 
-        // Check if chunk is in the non-record area
-        if (isInNonRecordArea(pos)) {
+        // 检查是否在非记录区域中
+        if (isInNonRecordArea(level, pos)) {
             return;
         }
 
-        // Check if chunk is protected
+        // 检查是否在保护区域中
         if (ProtectedChunkManager.isProtected(level, pos)) {
             return;
         }
@@ -26,35 +27,16 @@ public class ChunkLoadHandler {
         tracker.recordLoad(pos);
     }
 
-    private static boolean isInNonRecordArea(ChunkPos pos) {
+    private static boolean isInNonRecordArea(ServerLevel level, ChunkPos pos) {
         String areaStr = Config.getInstance().nonRecordArea.get();
         if (areaStr == null || areaStr.isEmpty()) {
             return false;
         }
 
-        try {
-            String[] parts = areaStr.split(",");
-            if (parts.length != 4) return false;
+        var areaOpt = AreaParser.parse(areaStr);
+        if (areaOpt.isEmpty()) return false;
 
-            int bx1 = Integer.parseInt(parts[0].trim());
-            int bz1 = Integer.parseInt(parts[1].trim());
-            int bx2 = Integer.parseInt(parts[2].trim());
-            int bz2 = Integer.parseInt(parts[3].trim());
-
-            // Convert block coords to chunk coords
-            int cx1 = bx1 >> 4;
-            int cz1 = bz1 >> 4;
-            int cx2 = bx2 >> 4;
-            int cz2 = bz2 >> 4;
-
-            int minX = Math.min(cx1, cx2);
-            int maxX = Math.max(cx1, cx2);
-            int minZ = Math.min(cz1, cz2);
-            int maxZ = Math.max(cz1, cz2);
-
-            return pos.x >= minX && pos.x <= maxX && pos.z >= minZ && pos.z <= maxZ;
-        } catch (NumberFormatException e) {
-            return false;
-        }
+        var area = areaOpt.get();
+        return area.matchesWorld(level) && area.containsChunk(pos);
     }
 }
