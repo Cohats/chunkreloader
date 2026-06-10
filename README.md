@@ -150,7 +150,17 @@ Failed: 100
 所有重载操作（包括手动命令和自动重载）均采用**分批处理**：
 - 每 tick 最多处理 50 个区块
 - 大范围重载会在后台逐步完成，不会导致服务器"时间静止"
-- 使用 `/chunckreloader status` 查看实时进度
+- 每处理完 25% 会向所有 OP 玩家发送进度提示
+
+**进度提示示例**:
+```
+[ChunkReloader] ■■■■■■■□□□ 50% (5000/10000 ↑4200 ↓700 ✗100)
+```
+```
+[ChunkReloader] Reload complete! 4200 regenerated, 700 skipped, 100 failed (10000 chunks, 45s)
+```
+
+也可以使用 `/chunckreloader status` 查看更详细的实时进度。
 
 ### 玩家更新检测
 
