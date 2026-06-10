@@ -6,13 +6,15 @@
 
 - **`/chunckreloader reload`** - 手动重载指定世界的指定范围区块
 - **`/chunckreloader reload <世界> all`** - 重载所有玩家更新过的过期区块
+- **`/chunckreloader first <世界>`** - 强制删除保护区以外的所有区块（工厂重置）
 - **`/chunckreloader set`** - 游戏内直接修改配置，无需编辑文件
 - **`/chunckreloader get worldName`** - 获取所有可用世界名称列表
-- **`/chunckreloader status`** - 查看当前配置和运行状态
+- **`/chunckreloader status`** - 查看当前配置和运行状态（按世界显示）
 - **自动重载** - 自动检测并重载超过指定天数未加载的区块
 - **领地保护** - 支持 GriefDefender / FTB Chunks / OPAC（软依赖）
 - **防卡顿分批处理** - 所有重载操作每 tick 最多处理 50 个区块，避免服务器卡顿
 - **玩家更新检测** - 矩形重载默认只重载被玩家访问/更新过的区块，避免无效重载
+- **Tab 补全** - 世界名称参数支持 Tab 自动补全
 - **配置文件** - 所有功能均可通过配置文件或命令调整
 
 ## 安装
@@ -111,9 +113,34 @@
 
 > **注意**: `enableAutoReload` 和 `staleDays` 现在也按世界配置，需要指定世界名。世界名错误会提示 `Wrong world name`。
 
+### `/chunckreloader first <世界>`
+
+**危险操作** — 扫描指定世界所有 `.mca` 区域文件，强制删除保护区以外的**所有区块**，下次加载时重新生成。
+
+| 参数 | 说明 |
+|------|------|
+| `世界` | 世界名称（如 `overworld`、`the_nether`、`the_end`），支持 Tab 补全 |
+
+**工作原理**:
+1. 扫描世界目录下所有 `r.*.mca` 区域文件
+2. 解析每个文件的头部信息，找出所有已存在的区块
+3. 跳过保护区域内的区块（GriefDefender / FTB Chunks / OPAC / 配置 protectArea）
+4. 将未保护的区块排队清除（每 tick 50 个）
+5. 玩家下次靠近时，游戏自动重新生成地形
+
+> **注意**: 此命令不会跳过玩家更新检测——它会删除所有能找到的未保护区区块。
+> 如果要删除大量区块，请确保服务器配置了适当的自动重载间隔，避免瞬间加载所有区块导致卡顿。
+
+**示例**:
+```
+/chunckreloader first overworld
+/chunckreloader first the_nether
+/chunckreloader first the_end
+```
+
 ### `/chunckreloader status`
 
-显示当前所有配置值和运行状态。如果正在进行批量重载，还会显示实时进度。
+显示当前所有世界的配置值和运行状态。如果正在进行批量重载，还会显示实时进度。
 
 **示例**:
 ```
@@ -122,10 +149,21 @@
 输出示例:
 ```
 === ChunkReloader Status ===
-Auto Reload: overworld:false
-Stale Days: overworld:14
-Non-Record Area: overworld:-50000,-50000,50000,50000
-Protect Area: overworld:-50000,-50000,50000,50000
+overworld:
+  Auto Reload: false
+  Stale Days: 14d
+  Non-Record Area: -50000,-50000,50000,50000
+  Protect Area: -50000,-50000,50000,50000
+the_nether:
+  Auto Reload: false
+  Stale Days: 14d
+  Non-Record Area: (default)
+  Protect Area: (default)
+the_end:
+  Auto Reload: false
+  Stale Days: 14d
+  Non-Record Area: (default)
+  Protect Area: (default)
 Check Interval: 3600s
 ```
 有重载进行中时额外显示:
@@ -141,9 +179,11 @@ Failed: 100
 ### 工作原理
 
 1. 玩家加载区块时，模组自动追踪该区块的加载信息（用于 `all` 命令和自动重载）
-2. 清除指定区块在 `.mca` 区域文件中的记录
-3. 从内存中卸载该区块
-4. 当玩家下次靠近时，游戏会自动重新生成地形
+2. 通过 Minecraft 的 `ChunkStorage.write(ChunkPos, CompoundTag)` API 将区块数据写入空的 NBT 并标记状态为 `minecraft:empty`（同时更新文件磁盘和内存缓存，确保区块真正被清除）
+3. 从内存中卸载该区块并阻止旧数据回写
+4. 当玩家下次靠近时，游戏检测到区块状态为 empty，自动重新生成地形
+
+> **技术说明**: 旧版本使用 RandomAccessFile 直接修改 MCA 文件头部，但 Minecraft 的 RegionFile 会缓存头部信息在内存中，导致磁盘修改不生效。v1.1.0+ 改用 ChunkStorage API（ChunkMap extends ChunkStorage），该 API 会正确同步更新磁盘文件和内存缓存。
 
 ### 防卡顿机制
 
