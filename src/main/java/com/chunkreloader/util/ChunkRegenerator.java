@@ -3,6 +3,7 @@ package com.chunkreloader.util;
 import com.chunkreloader.ChunkReloaderMod;
 import com.chunkreloader.manager.ChunkLoadTracker;
 import com.chunkreloader.manager.ProtectedChunkManager;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerChunkCache;
@@ -17,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Map;
 
 public class ChunkRegenerator {
     private static final Logger LOGGER = LoggerFactory.getLogger("ChunkReloaderRegen");
@@ -26,6 +28,9 @@ public class ChunkRegenerator {
     private static Method storageWriteMethod;
     private static Field storageField;
     private static boolean storageResolved = false;
+
+    private static Field visibleChunkMapField;
+    private static boolean chunkMapResolved = false;
 
     /**
      * Regenerate all chunks in the rectangle between pos1 and pos2.
@@ -117,18 +122,36 @@ public class ChunkRegenerator {
     }
 
     /**
-     * Regenerate a single chunk. Tries MCA file manipulation first,
-     * falls back to block-by-block clearing if that fails.
+     * Regenerate a single chunk by clearing both disk (MCA) and memory.
+     *
+     * 1. Clear MCA header on disk — so future loads regenerate fresh terrain
+     * 2. If chunk is loaded in memory, clear all blocks to air
+     * 3. Try to drop the chunk from ChunkMap so it reloads from (cleared) disk
+     * 4. Call level.getChunk() to trigger load/generation
      */
     private static boolean regenerateSingleChunk(ServerLevel level, ChunkPos pos) {
-        boolean diskCleared = clearChunkFromDisk(level, pos);
+        LevelChunk existingChunk = level.getChunkSource().getChunkNow(pos.x, pos.z);
+        boolean wasLoaded = existingChunk != null;
 
-        if (!diskCleared) {
-            LOGGER.info("Using fallback block clearing for chunk {}", pos);
+        // Step 1: Clear from disk (MCA file or storage write)
+        clearChunkFromDisk(level, pos);
+
+        // Step 2: If chunk is loaded in memory, clear it directly
+        if (wasLoaded) {
+            LOGGER.debug("Chunk {} is in memory, clearing blocks to air", pos);
             fallbackClearChunk(level, pos);
         }
 
-        // Reload the chunk to trigger regeneration
+        // Step 3: Try to drop from ChunkMap so next getChunk() actually loads from disk
+        if (wasLoaded) {
+            try {
+                forceUnloadChunk(level, pos);
+            } catch (Exception e) {
+                LOGGER.debug("Could not force-unload chunk {}: {}", pos, e.getMessage());
+            }
+        }
+
+        // Step 4: Trigger chunk load — if unloaded, this reads cleared MCA and regenerates
         try {
             level.getChunk(pos.x, pos.z);
         } catch (Exception e) {
@@ -140,44 +163,81 @@ public class ChunkRegenerator {
     }
 
     /**
-     * Clear chunk data from the region file by modifying the MCA header.
-     * Uses chunkMap storage accessed via runtime reflection.
+     * Try to force-unload a chunk from the ChunkMap's internal structures.
+     * Uses reflection to find and remove the chunk from visibleChunkMap.
      */
-    private static boolean clearChunkFromDisk(ServerLevel level, ChunkPos pos) {
-        try {
-            ServerChunkCache cache = level.getChunkSource();
-            ChunkMap chunkMap = cache.chunkMap; // via AT
+    private static void forceUnloadChunk(ServerLevel level, ChunkPos pos) throws Exception {
+        ServerChunkCache cache = level.getChunkSource();
+        ChunkMap chunkMap = cache.chunkMap;
 
-            // Save the chunk first if possible
-            LevelChunk existingChunk = cache.getChunkNow(pos.x, pos.z);
-            if (existingChunk != null) {
-                trySaveChunk(chunkMap, existingChunk);
+        if (!chunkMapResolved) {
+            resolveChunkMap(chunkMap);
+        }
+
+        long packedPos = ChunkPos.asLong(pos.x, pos.z);
+
+        if (visibleChunkMapField != null) {
+            Object map = visibleChunkMapField.get(chunkMap);
+            if (map instanceof Long2ObjectMap<?> longMap) {
+                longMap.remove(packedPos);
+                LOGGER.debug("Removed chunk {} from visibleChunkMap", pos);
+            } else if (map instanceof Map<?, ?> genericMap) {
+                ((Map<Long, ?>) genericMap).remove(packedPos);
+                LOGGER.debug("Removed chunk {} from chunk map", pos);
             }
-
-            // Find and use storage to write empty chunk data
-            if (!tryWriteEmptyChunk(chunkMap, pos)) {
-                // Fallback: directly modify the MCA file
-                clearChunkFromMcaFile(level, pos);
-            }
-
-            return true;
-        } catch (Exception e) {
-            LOGGER.warn("Disk clear failed for chunk {}: {}", pos, e.getMessage());
-            return false;
         }
     }
 
     /**
-     * Try to save a chunk using ChunkMap.save via runtime reflection.
+     * Find the internal chunk map field (visibleChunkMap or similar) in ChunkMap.
      */
-    private static void trySaveChunk(ChunkMap chunkMap, LevelChunk chunk) {
+    private static void resolveChunkMap(ChunkMap chunkMap) {
+        chunkMapResolved = true;
+
+        // Look for Long2ObjectMap fields (ChunkMap uses these internally)
+        for (Field field : chunkMap.getClass().getDeclaredFields()) {
+            Class<?> type = field.getType();
+            // Look for maps from long -> LevelChunk
+            if (Long2ObjectMap.class.isAssignableFrom(type)) {
+                field.setAccessible(true);
+                visibleChunkMapField = field;
+                LOGGER.info("Found chunk map field: {} ({})", field.getName(), type.getSimpleName());
+                return;
+            }
+        }
+
+        // Fallback: look for Map<Long, ?> fields
+        for (Field field : chunkMap.getClass().getDeclaredFields()) {
+            if (Map.class.isAssignableFrom(field.getType())) {
+                String typeName = field.getGenericType().getTypeName();
+                if (typeName.contains("Long") && (typeName.contains("Chunk") || typeName.contains("chunk"))) {
+                    field.setAccessible(true);
+                    visibleChunkMapField = field;
+                    LOGGER.info("Found chunk map field (fallback): {} ({})", field.getName(), typeName);
+                    return;
+                }
+            }
+        }
+    }
+
+    /**
+     * Clear chunk data from disk.
+     * Tries storage write via reflection first, falls back to MCA manipulation.
+     */
+    private static void clearChunkFromDisk(ServerLevel level, ChunkPos pos) {
         try {
-            Method saveMethod = findSaveMethod(chunkMap);
-            if (saveMethod != null) {
-                saveMethod.invoke(chunkMap, chunk);
+            ServerChunkCache cache = level.getChunkSource();
+            ChunkMap chunkMap = cache.chunkMap;
+
+            // Try reflection storage write first
+            if (tryWriteEmptyChunk(chunkMap, pos)) {
+                LOGGER.debug("Wrote empty chunk data to storage for {}", pos);
+            } else {
+                // Fallback: directly modify the MCA file
+                clearChunkFromMcaFile(level, pos);
             }
         } catch (Exception e) {
-            LOGGER.debug("Could not save chunk: {}", e.getMessage());
+            LOGGER.warn("Disk clear failed for chunk {}: {}", pos, e.getMessage());
         }
     }
 
@@ -202,23 +262,6 @@ public class ChunkRegenerator {
             LOGGER.debug("Storage write failed: {}", e.getMessage());
         }
         return false;
-    }
-
-    /**
-     * Find the ChunkMap.save method via reflection since the AT might not match.
-     */
-    private static Method findSaveMethod(ChunkMap chunkMap) {
-        for (Method m : chunkMap.getClass().getDeclaredMethods()) {
-            if (m.getName().contains("save") || m.getName().contains("Save")) {
-                Class<?>[] params = m.getParameterTypes();
-                if (params.length == 1 && params[0] != null &&
-                        params[0].getSimpleName().contains("ChunkAccess")) {
-                    m.setAccessible(true);
-                    return m;
-                }
-            }
-        }
-        return null;
     }
 
     /**
@@ -289,21 +332,8 @@ public class ChunkRegenerator {
             int localZ = pos.z & 31;
             int chunkIndex = localX + localZ * 32;
 
-            // Try to find the region file - check common locations
-            java.nio.file.Path[] possiblePaths = {
-                    level.getServer().getFile(".").resolve("region"),
-                    level.getServer().getFile(".").resolve("world/region"),
-                    level.getServer().getFile(".").resolve("saves/world/region"),
-            };
-
-            java.nio.file.Path regionFile = null;
-            for (java.nio.file.Path p : possiblePaths) {
-                java.nio.file.Path test = p.resolve("r." + regionX + "." + regionZ + ".mca");
-                if (java.nio.file.Files.exists(test)) {
-                    regionFile = test;
-                    break;
-                }
-            }
+            // Try to find the region file
+            java.nio.file.Path regionFile = findRegionFile(level, regionX, regionZ);
 
             if (regionFile == null) {
                 LOGGER.debug("Region file not found for chunk {}", pos);
@@ -324,18 +354,53 @@ public class ChunkRegenerator {
                     return;
                 }
 
-                // Clear header entry
+                // Clear header entry (offset = 0, marking chunk as non-existent)
                 file.seek(chunkIndex * 4);
                 file.write(new byte[]{0, 0, 0, 0});
                 // Clear timestamp entry
                 file.seek(4096 + chunkIndex * 4);
                 file.write(new byte[]{0, 0, 0, 0});
 
-                LOGGER.debug("Cleared chunk {} from MCA file", pos);
+                LOGGER.debug("Cleared chunk {} from MCA file r.{}.{}.mca", pos, regionX, regionZ);
             }
         } catch (Exception e) {
-            LOGGER.warn("MCA manipulation failed: {}", e.getMessage());
+            LOGGER.warn("MCA manipulation failed for chunk {}: {}", pos, e.getMessage());
         }
+    }
+
+    /**
+     * Find the region file for the given region coordinates.
+     */
+    private static java.nio.file.Path findRegionFile(ServerLevel level, int regionX, int regionZ) {
+        // Try to determine the correct region file path using the level's dimension path
+        try {
+            // Method 1: Use the level's storage path (most reliable in 1.21.1)
+            var dimensionPath = level.dimension().location().getPath();
+            var worldDir = level.getServer().getFile(".");
+
+            // Check common paths
+            java.nio.file.Path[] possiblePaths = {
+                    // Single-player / server root level
+                    worldDir.resolve("region"),
+                    // Bukkit-style world directory
+                    worldDir.resolve(dimensionPath).resolve("region"),
+                    worldDir.resolve("world").resolve("region"),
+                    worldDir.resolve("world").resolve(dimensionPath).resolve("region"),
+                    // Minecraft saves directory
+                    worldDir.resolve("saves").resolve("world").resolve("region"),
+            };
+
+            for (java.nio.file.Path p : possiblePaths) {
+                java.nio.file.Path test = p.resolve("r." + regionX + "." + regionZ + ".mca");
+                if (java.nio.file.Files.exists(test)) {
+                    return test;
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.debug("Error finding region file: {}", e.getMessage());
+        }
+
+        return null;
     }
 
     /**
@@ -357,6 +422,6 @@ public class ChunkRegenerator {
             }
         }
 
-        LOGGER.debug("Fallback cleared chunk {} with air blocks", pos);
+        LOGGER.debug("Cleared chunk {} with air blocks (fallback)", pos);
     }
 }
