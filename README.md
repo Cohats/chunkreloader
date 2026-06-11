@@ -11,7 +11,7 @@
 - **`/chunckreloader get worldName`** - 获取所有可用世界名称列表
 - **`/chunckreloader status`** - 查看当前配置和运行状态（按世界显示）
 - **自动重载** - 自动检测并重载超过指定天数未加载的区块
-- **领地保护** - 支持 GriefDefender / FTB Chunks / OPAC（软依赖）
+- **领地保护** - 支持 OPAC 开放领地（软依赖）
 - **防卡顿分批处理** - 所有重载操作每 tick 最多处理 50 个区块，避免服务器卡顿
 - **玩家更新检测** - 矩形重载默认只重载被玩家访问/更新过的区块，避免无效重载
 - **Tab 补全** - 世界名称参数支持 Tab 自动补全
@@ -20,7 +20,7 @@
 ## 安装
 
 1. 安装 **NeoForge 21.1+**（对应 Minecraft 1.21.1）
-2. 将 `chunkreloader-2.0.0.jar` 放入 `.minecraft/mods/` 文件夹（客户端）或服务端 `mods/` 文件夹
+2. 将 `chunkreloader-2.0.1.jar` 放入 `.minecraft/mods/` 文件夹（客户端）或服务端 `mods/` 文件夹
 3. 启动游戏/服务端
 
 ## 命令
@@ -124,7 +124,7 @@
 **工作原理**:
 1. 扫描世界目录下所有 `r.*.mca` 区域文件
 2. 解析每个文件的头部信息，找出所有已存在的区块
-3. 跳过保护区域内的区块（GriefDefender / FTB Chunks / OPAC / 配置 protectArea）
+3. 跳过保护区域内的区块（OPAC / 配置 protectArea）
 4. 将未保护的区块排队清除（每 tick 50 个）
 5. 玩家下次靠近时，游戏自动重新生成地形
 
@@ -252,8 +252,6 @@ Failed: 100
 
 | 保护系统 | 类型 | 说明 |
 |----------|------|------|
-| **GriefDefender** | 软依赖 | 安装后自动识别领地 |
-| **FTB Chunks** | 软依赖 | 安装后自动识别已认领区块 |
 | **Open Parties and Claims** (开放领地) | 软依赖 | 安装后自动识别声明区块 |
 | **配置文件保护区域** | 内置 | 通过 `protectArea` 配置项手动指定 |
 
@@ -269,7 +267,7 @@ Failed: 100
 - **Minecraft 版本**: 1.21.1
 - **NeoForge 版本**: 21.1+
 - **服务端/客户端**: 两端通用（命令仅在服务端生效，需要 OP 权限）
-- **保护系统**: GriefDefender / FTB Chunks / Open Parties and Claims（均为软依赖）
+- **保护系统**: Open Parties and Claims（软依赖）
 
 ## 自动重载机制
 
@@ -287,4 +285,4 @@ Failed: 100
 ./gradlew build
 ```
 
-构建产物位于 `build/libs/chunkreloader-2.0.0.jar`
+构建产物位于 `build/libs/chunkreloader-2.0.1.jar`
