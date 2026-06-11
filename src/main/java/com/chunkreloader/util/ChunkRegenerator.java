@@ -80,10 +80,20 @@ public class ChunkRegenerator {
             return false;
         }
 
+        // Force-load the chunk into memory so we can modify it
         LevelChunk existingChunk = level.getChunkSource().getChunkNow(pos.x, pos.z);
+        if (existingChunk == null) {
+            existingChunk = level.getChunk(pos.x, pos.z);
+        }
 
+        // Remove ALL non-player entities from this chunk (prevents accumulation)
+        if (existingChunk != null) {
+            removeEntitiesFromChunk(level, pos);
+            existingChunk.setUnsaved(false);
+        }
+
+        // Clear block data via ChunkStorage API
         boolean success = false;
-        // Try ChunkStorage API first (updates both file and cache properly)
         try {
             clearChunkViaChunkStorage(level, pos);
             success = true;
@@ -91,11 +101,9 @@ public class ChunkRegenerator {
             LOGGER.warn("ChunkStorage API failed for chunk {}, falling back to MCA: {}", pos, e.getMessage());
         }
 
-        // Fallback: direct MCA manipulation + RegionFile cache clearing
         if (!success) {
             try {
                 clearChunkFromMcaFile(level, pos);
-                clearChunkFromRegionFileCache(level, pos);
                 success = true;
             } catch (Exception e2) {
                 LOGGER.error("Both ChunkStorage and MCA methods failed for chunk {}: {}", pos, e2.getMessage());
@@ -103,15 +111,28 @@ public class ChunkRegenerator {
             }
         }
 
-        // Prevent old in-memory data from being saved back
-        if (existingChunk != null) {
-            existingChunk.setUnsaved(false);
-            LOGGER.info("Chunk {} in memory — unsaved=false to prevent save-back", pos);
-        }
+        // Clear entity data on disk via proper API
+        clearEntityDataViaStorage(level, pos);
 
         ChunkLoadTracker.get(level).removeRecord(pos);
         LOGGER.info("Chunk {} — will regenerate on next load", pos);
         return true;
+    }
+
+    private static void removeEntitiesFromChunk(ServerLevel level, ChunkPos pos) {
+        int minX = pos.getMinBlockX(), maxX = pos.getMaxBlockX();
+        int minZ = pos.getMinBlockZ(), maxZ = pos.getMaxBlockZ();
+        var box = new net.minecraft.world.phys.AABB(minX, level.getMinBuildHeight(), minZ,
+                maxX + 1, level.getMaxBuildHeight(), maxZ + 1);
+        var entities = level.getEntities((net.minecraft.world.entity.Entity) null, box, e -> true);
+        int removed = 0;
+        for (var entity : entities) {
+            if (!(entity instanceof net.minecraft.world.entity.player.Player)) {
+                entity.discard();
+                removed++;
+            }
+        }
+        LOGGER.info("Chunk {}: {} total {} removed", pos, entities.size(), removed);
     }
 
     /**
@@ -282,29 +303,66 @@ public class ChunkRegenerator {
         return null;
     }
 
-    private static void clearChunkFromRegionFileCache(ServerLevel level, ChunkPos pos) {
-        // If ChunkStorage.write() is not available, try to invalidate the
-        // RegionFile cache by accessing the IOWorker's RegionFile references.
+    /**
+     * Clear entity data for a chunk via the proper EntityPersistentStorage API.
+     *
+     * Uses PersistentEntitySectionManager.permanentStorage.storeEntities()
+     * to write an empty entity list. This goes through IOWorker -> RegionFile,
+     * properly updating both the MCA file AND the RegionFile's in-memory cache.
+     */
+    private static void clearEntityDataViaStorage(ServerLevel level, ChunkPos pos) {
         try {
-            var chunkMap = level.getChunkSource().chunkMap;
-            var workerField = ChunkStorage.class.getDeclaredField("worker");
-            workerField.setAccessible(true);
-            Object worker = workerField.get(chunkMap);
-            if (worker != null) {
-                // IOWorker stores RegionFile references. Try to find and clear them.
-                // Scan worker fields for any storage/region-related objects
-                for (var f : worker.getClass().getDeclaredFields()) {
-                    f.setAccessible(true);
-                    Object val = f.get(worker);
-                    if (val == null) continue;
-                    String typeName = val.getClass().getName();
-                    if (typeName.contains("RegionFile") || typeName.contains("regionCache")) {
-                        LOGGER.info("Found RegionFile/regionCache field in IOWorker: {}", f.getName());
-                    }
-                }
-            }
+            // Get entityManager from ServerLevel
+            var emField = ServerLevel.class.getDeclaredField("entityManager");
+            emField.setAccessible(true);
+            Object em = emField.get(level);
+
+            // Get permanentStorage field from PersistentEntitySectionManager
+            var storageField = em.getClass().getDeclaredField("permanentStorage");
+            storageField.setAccessible(true);
+            Object storage = storageField.get(em);
+
+            if (storage == null) return;
+
+            // Create empty ChunkEntities<Entity>(pos, List.of())
+            Class<?> chunkEntitiesClass = Class.forName("net.minecraft.world.level.entity.ChunkEntities");
+            var constructor = chunkEntitiesClass.getConstructor(ChunkPos.class, List.class);
+            Object emptyEntities = constructor.newInstance(pos, List.of());
+
+            // Call EntityPersistentStorage.storeEntities(ChunkEntities)
+            var storeMethod = storage.getClass().getMethod("storeEntities", chunkEntitiesClass);
+            storeMethod.invoke(storage, emptyEntities);
+
+            LOGGER.info("Cleared entity data for chunk {} via EntityPersistentStorage", pos);
         } catch (Exception e) {
-            LOGGER.warn("Could not clear RegionFile cache: {}", e.getMessage());
+            LOGGER.warn("Failed to clear entity data via storage for chunk {}: {}", pos, e.getMessage());
         }
     }
+
+    /**
+     * Called after ALL chunks in a batch are processed. Saves empty entity data
+     * and flushes the entity storage to disk.
+     */
+    public static void flushEntityData(ServerLevel level) {
+        try {
+            var emField = ServerLevel.class.getDeclaredField("entityManager");
+            emField.setAccessible(true);
+            Object em = emField.get(level);
+
+            // Save all loaded entity sections
+            em.getClass().getMethod("saveAll").invoke(em);
+
+            // Also flush the permanent storage to ensure writes are on disk
+            var storageField = em.getClass().getDeclaredField("permanentStorage");
+            storageField.setAccessible(true);
+            Object storage = storageField.get(em);
+            if (storage != null) {
+                var flushMethod = storage.getClass().getMethod("flush", boolean.class);
+                flushMethod.invoke(storage, true);
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Entity flush failed: {}", e.getMessage());
+        }
+    }
+
 }

@@ -143,6 +143,11 @@ public class ReloadQueue {
         active = false;
         long elapsed = (System.currentTimeMillis() - startTime) / 1000;
 
+        // Flush entity data to persist removed entities
+        if (targetLevel != null) {
+            ChunkRegenerator.flushEntityData(targetLevel);
+        }
+
         ChunkReloaderMod.LOGGER.info(
                 "Reload complete: {} regenerated, {} skipped, {} failed (total: {}, {}s)",
                 regenCount, skipCount, failCount, totalQueued, elapsed

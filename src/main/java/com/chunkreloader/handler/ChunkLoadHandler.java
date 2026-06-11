@@ -24,7 +24,7 @@ public class ChunkLoadHandler {
     }
 
     private static boolean isInNonRecordArea(ServerLevel level, ChunkPos pos) {
-        String areaStr = Config.getInstance().nonRecordArea.get();
+        String areaStr = Config.getInstance().getNonRecordArea(level);
         if (areaStr == null || areaStr.isEmpty()) {
             return false;
         }
@@ -33,6 +33,6 @@ public class ChunkLoadHandler {
         if (areaOpt.isEmpty()) return false;
 
         var area = areaOpt.get();
-        return area.matchesWorld(level) && area.containsChunk(pos);
+        return area.containsChunk(pos);
     }
 }

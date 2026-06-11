@@ -79,6 +79,34 @@ public class Config {
     }
 
     /**
+     * 获取指定世界的 nonRecordArea 值（仅坐标部分，不含世界前缀）
+     */
+    public String getNonRecordArea(ServerLevel level) {
+        return parseWorldStr(nonRecordArea.get(), level, "-50000,-50000,50000,50000");
+    }
+
+    /**
+     * 获取指定世界的 protectArea 值（仅坐标部分，不含世界前缀）
+     */
+    public String getProtectArea(ServerLevel level) {
+        return parseWorldStr(protectArea.get(), level, "-50000,-50000,50000,50000");
+    }
+
+    /**
+     * 将 nonRecordArea 设为指定世界/值
+     */
+    public void setNonRecordArea(String worldName, String value) {
+        nonRecordArea.set(worldName + ":" + value);
+    }
+
+    /**
+     * 将 protectArea 设为指定世界/值
+     */
+    public void setProtectArea(String worldName, String value) {
+        protectArea.set(worldName + ":" + value);
+    }
+
+    /**
      * 将 enableAutoReload 设为指定世界/值
      */
     public void setAutoReload(String worldName, boolean value) {
@@ -97,12 +125,12 @@ public class Config {
     /**
      * 获取 config 字符串中存储的世界名（冒号前的部分），如果没有则为 null
      */
-    private String getStoredWorld(String raw) {
+    public String getStoredWorld(String raw) {
         if (raw == null || raw.isEmpty()) return null;
         int colon = raw.indexOf(':');
         if (colon < 0) return null;
         String world = raw.substring(0, colon).trim();
-        return DIM_PATHS.contains(world) ? world : null;
+        return world;
     }
 
     /**
@@ -165,6 +193,21 @@ public class Config {
             try { return Integer.parseInt(val.trim()); }
             catch (NumberFormatException e) { return defaultVal; }
         }
+        return defaultVal;
+    }
+
+    /**
+     * 解析 "world:value" 或 "value" 格式为字符串
+     */
+    private String parseWorldStr(String raw, ServerLevel level, String defaultVal) {
+        if (raw == null || raw.isEmpty()) return defaultVal;
+        int colon = raw.indexOf(':');
+        if (colon < 0) return raw.trim();
+        String world = raw.substring(0, colon).trim();
+        String val = raw.substring(colon + 1).trim();
+        String worldFull = level.dimension().location().toString();
+        String worldShort = level.dimension().location().getPath();
+        if (worldFull.equals(world) || worldShort.equals(world)) return val;
         return defaultVal;
     }
 }

@@ -2,6 +2,7 @@ package com.chunkreloader.manager;
 
 import com.chunkreloader.config.Config;
 import com.chunkreloader.util.AreaParser;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import org.slf4j.Logger;
@@ -45,7 +46,7 @@ public class ProtectedChunkManager {
     // ---- Config-based protection ----
 
     private static boolean isInProtectArea(ServerLevel level, ChunkPos pos) {
-        String areaStr = Config.getInstance().protectArea.get();
+        String areaStr = Config.getInstance().getProtectArea(level);
         if (areaStr == null || areaStr.isEmpty()) {
             return false;
         }
@@ -54,7 +55,7 @@ public class ProtectedChunkManager {
         if (areaOpt.isEmpty()) return false;
 
         var area = areaOpt.get();
-        return area.matchesWorld(level) && area.containsChunk(pos);
+        return area.containsChunk(pos);
     }
 
     // ---- GriefDefender ----
@@ -195,45 +196,16 @@ public class ProtectedChunkManager {
     @SuppressWarnings("unchecked")
     private static boolean isOpacClaim(ServerLevel level, ChunkPos pos) {
         try {
-            // Try approach 1: OpenPACServerAPI
-            try {
-                Class<?> serverApiClass = Class.forName("xaero.pac.common.server.api.OpenPACServerAPI");
-                Object serverApi = serverApiClass.getMethod("get", net.minecraft.server.MinecraftServer.class)
-                        .invoke(null, level.getServer());
-                Object claimsManager = serverApi.getClass().getMethod("getServerClaimsManager").invoke(serverApi);
-                Object claim = claimsManager.getClass()
-                        .getMethod("getClaim", int.class, int.class, net.minecraft.resources.ResourceKey.class)
-                        .invoke(claimsManager, pos.x, pos.z, level.dimension());
-                return claim != null;
-            } catch (Exception ignored) {}
+            Class<?> serverApiClass = Class.forName("xaero.pac.common.server.api.OpenPACServerAPI");
+            Object serverApi = serverApiClass.getMethod("get", net.minecraft.server.MinecraftServer.class)
+                    .invoke(null, level.getServer());
+            Object claimsManager = serverApi.getClass().getMethod("getServerClaimsManager").invoke(serverApi);
 
-            // Try approach 2: static ClaimManager
-            try {
-                Class<?> claimManagerClass = Class.forName("xaero.pac.common.claims.api.IClaimManager");
-                // Try to find the manager instance
-                Class<?> pacClass = Class.forName("xaero.pac.OpenPartiesAndClaims");
-                Object instance = pacClass.getMethod("getInstance").invoke(null);
-                Object manager = instance.getClass().getMethod("getClaimManager").invoke(instance);
-                Object claim = manager.getClass()
-                        .getMethod("getClaim", int.class, int.class, net.minecraft.resources.ResourceKey.class)
-                        .invoke(manager, pos.x, pos.z, level.dimension());
-                return claim != null;
-            } catch (Exception ignored) {}
-
-            // Try approach 3: direct claim check via chunk pos
-            try {
-                Class<?> utilClass = Class.forName("xaero.pac.common.claims.player.IPlayerClaimManager");
-                Object manager = utilClass.getMethod("get", ServerLevel.class)
-                        .invoke(null, level);
-                if (manager != null) {
-                    Object claim = manager.getClass()
-                            .getMethod("getClaim", int.class, int.class)
-                            .invoke(manager, pos.x, pos.z);
-                    return claim != null;
-                }
-            } catch (Exception ignored) {}
-
-            return false;
+            // IServerClaimsManagerAPI.get(ResourceLocation, int, int) — uses chunk coords
+            Object claim = claimsManager.getClass()
+                    .getMethod("get", net.minecraft.resources.ResourceLocation.class, int.class, int.class)
+                    .invoke(claimsManager, level.dimension().location(), pos.x, pos.z);
+            return claim != null;
         } catch (Exception e) {
             return false;
         }

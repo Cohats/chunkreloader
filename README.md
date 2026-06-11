@@ -20,7 +20,7 @@
 ## 安装
 
 1. 安装 **NeoForge 21.1+**（对应 Minecraft 1.21.1）
-2. 将 `chunkreloader-1.0.0.jar` 放入 `.minecraft/mods/` 文件夹（客户端）或服务端 `mods/` 文件夹
+2. 将 `chunkreloader-2.0.0.jar` 放入 `.minecraft/mods/` 文件夹（客户端）或服务端 `mods/` 文件夹
 3. 启动游戏/服务端
 
 ## 命令
@@ -97,8 +97,8 @@
 |------|--------|--------|------|
 | `enableAutoReload` | `<世界> true/false` | `overworld false` | 开关自动重载（按世界） |
 | `staleDays` | `<世界> 天数` | `overworld 14` | 区块过期天数（按世界） |
-| `nonRecordArea` | `<世界> <x1,z1,x2,z2>` | `overworld -50000,-50000,50000,50000` | 非记录区域（方块坐标） |
-| `protectArea` | `<世界> <x1,z1,x2,z2>` | `overworld -50000,-50000,50000,50000` | 保护区域（方块坐标） |
+| `nonRecordArea` | `<世界> <x1,z1,x2,z2>` | `overworld -50000,-50000,50000,50000` | 非记录区域（按世界，方块坐标） |
+| `protectArea` | `<世界> <x1,z1,x2,z2>` | `overworld -50000,-50000,50000,50000` | 保护区域（按世界，方块坐标） |
 | `autoReloadInterval` | 数字 | `3600` | 自动重载检查间隔（秒） |
 
 **示例**:
@@ -111,7 +111,7 @@
 /chunckreloader set autoReloadInterval 600
 ```
 
-> **注意**: `enableAutoReload` 和 `staleDays` 现在也按世界配置，需要指定世界名。世界名错误会提示 `Wrong world name`。
+> **注意**: 所有按世界配置的选项都需要指定世界名。世界名错误会提示 `Wrong world name`。
 
 ### `/chunckreloader first <世界>`
 
@@ -157,13 +157,13 @@ overworld:
 the_nether:
   Auto Reload: false
   Stale Days: 14d
-  Non-Record Area: (default)
-  Protect Area: (default)
+  Non-Record Area: -50000,-50000,50000,50000
+  Protect Area: -50000,-50000,50000,50000
 the_end:
   Auto Reload: false
   Stale Days: 14d
-  Non-Record Area: (default)
-  Protect Area: (default)
+  Non-Record Area: -50000,-50000,50000,50000
+  Protect Area: -50000,-50000,50000,50000
 Check Interval: 3600s
 ```
 有重载进行中时额外显示:
@@ -184,6 +184,7 @@ Failed: 100
 4. 当玩家下次靠近时，游戏检测到区块状态为 empty，自动重新生成地形
 
 > **技术说明**: 旧版本使用 RandomAccessFile 直接修改 MCA 文件头部，但 Minecraft 的 RegionFile 会缓存头部信息在内存中，导致磁盘修改不生效。v1.1.0+ 改用 ChunkStorage API（ChunkMap extends ChunkStorage），该 API 会正确同步更新磁盘文件和内存缓存。
+> v2.0.0 还修复了动物堆积问题——使用 `EntityPersistentStorage.storeEntities()` API 正确清除实体数据（同理，直接修改实体 MCA 文件也有 RegionFile 缓存问题）。
 
 ### 防卡顿机制
 
@@ -286,4 +287,4 @@ Failed: 100
 ./gradlew build
 ```
 
-构建产物位于 `build/libs/chunkreloader-1.0.0.jar`
+构建产物位于 `build/libs/chunkreloader-2.0.0.jar`

@@ -5,11 +5,11 @@ issueTrackerURL=""
 
 [[mods]]
 modId="chunkreloader"
-version="1.0.0"
+version="2.0.0"
 displayName="ChunkReloader"
 logoFile="chunkreloader.png"
 credits=""
-authors=""
+authors="Banana"
 description='''
 A mod that allows reloading (regenerating) chunks and auto-managing stale chunks.
 Features:

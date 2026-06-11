@@ -443,8 +443,6 @@ public class ChunkReloaderCommand {
         source.sendSuccess(() -> Component.literal("§e[ChunkReloader] Found §6" + allChunks.size() + "§e chunks total. Filtering protected areas..."), false);
 
         // Filter out protected chunks
-        Config config = Config.getInstance();
-        String protectStr = config.protectArea.get();
         List<ChunkPos> toDelete = new ArrayList<>();
         for (ChunkPos pos : allChunks) {
             if (ProtectedChunkManager.isProtected(level, pos)) continue;
@@ -587,8 +585,6 @@ public class ChunkReloaderCommand {
 
             boolean autoReload = config.getAutoReload(level);
             int staleDays = config.getStaleDays(level);
-            String nonRecord = config.nonRecordArea.get();
-            String protect = config.protectArea.get();
 
             String autoStr = autoReload ? "§atrue" : "§cfalse";
             source.sendSuccess(() -> Component.literal(
@@ -598,10 +594,9 @@ public class ChunkReloaderCommand {
             source.sendSuccess(() -> Component.literal(
                     "  §eStale Days: §f" + staleDays + "d"), false);
             source.sendSuccess(() -> Component.literal(
-                    "  §eNon-Record Area: §f" + (config.matchesStoredWorld(nonRecord, name) ? config.getDisplayValue(nonRecord) : "(default)")), false);
+                    "  §eNon-Record Area: §f" + config.getNonRecordArea(level)), false);
             source.sendSuccess(() -> Component.literal(
-                    "  §eProtect Area: §f" + (protect.isEmpty() ? "(none)" :
-                            config.matchesStoredWorld(protect, name) ? config.getDisplayValue(protect) : "(default)")), false);
+                    "  §eProtect Area: §f" + config.getProtectArea(level)), false);
         }
 
         source.sendSuccess(() -> Component.literal("§eCheck Interval: §f" + config.autoReloadInterval.get() + "s"), false);
@@ -618,4 +613,5 @@ public class ChunkReloaderCommand {
 
         return 1;
     }
+
 }
