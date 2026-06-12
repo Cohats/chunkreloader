@@ -7,15 +7,18 @@
 - **`/chunckreloader reload`** - 手动重载指定世界的指定范围区块
 - **`/chunckreloader reload <世界> all`** - 重载所有玩家更新过的过期区块
 - **`/chunckreloader first <世界>`** - 强制删除保护区以外的所有区块（工厂重置）
-- **`/chunckreloader set`** - 游戏内直接修改配置，无需编辑文件
+- **`/chunckreloader stop`** - 取消正在进行的重载操作
+- **`/chunckreloader set`** - 游戏内直接修改配置，无需编辑文件（支持 Tab 补全）
 - **`/chunckreloader get worldName`** - 获取所有可用世界名称列表
 - **`/chunckreloader status`** - 查看当前配置和运行状态（按世界显示）
 - **自动重载** - 自动检测并重载超过指定天数未加载的区块
+- **自动 MCA 压缩** - 重载完成后自动清理硬盘空间，显示释放大小
 - **领地保护** - 支持 OPAC 开放领地（软依赖）
-- **防卡顿分批处理** - 所有重载操作每 tick 最多处理 50 个区块，避免服务器卡顿
+- **防卡顿分批处理** - 所有重载操作每 tick 分批处理，区块数可通过 `batchSize` 配置
 - **玩家更新检测** - 矩形重载默认只重载被玩家访问/更新过的区块，避免无效重载
-- **Tab 补全** - 世界名称参数支持 Tab 自动补全
-- **配置文件** - 所有功能均可通过配置文件或命令调整
+- **Tab 补全** - 全部参数支持 Tab 自动补全
+- **可配置批量大小** - 通过 `set batchSize` 控制每 tick 处理区块数
+- **取消重载** - 随时通过 `/chunckreloader stop` 取消进行中的操作
 
 ## 安装
 
@@ -89,30 +92,40 @@
 /chunckreloader reload the_end all force
 ```
 
-### `/chunckreloader set <选项> <值>`
+### `/chunckreloader stop`
 
-游戏内直接修改配置，立即生效。
+取消当前正在进行的重载操作。
 
-| 选项 | 值类型 | 默认值 | 说明 |
-|------|--------|--------|------|
+```
+/chunckreloader stop
+```
+
+没有重载进行时提示错误。取消后显示已处理和剩余区块数量。
+
+### `/chunckreloader set <选项> <参数>`
+
+游戏内直接修改配置，**支持 Tab 补全**，立即生效。
+
+| 选项 | 参数 | 默认值 | 说明 |
+|------|------|--------|------|
 | `enableAutoReload` | `<世界> true/false` | `overworld false` | 开关自动重载（按世界） |
 | `staleDays` | `<世界> 天数` | `overworld 14` | 区块过期天数（按世界） |
 | `nonRecordArea` | `<世界> <x1,z1,x2,z2>` | `overworld -50000,-50000,50000,50000` | 非记录区域（按世界，方块坐标） |
 | `protectArea` | `<世界> <x1,z1,x2,z2>` | `overworld -50000,-50000,50000,50000` | 保护区域（按世界，方块坐标） |
-| `autoReloadInterval` | 数字 | `3600` | 自动重载检查间隔（秒） |
-| `batchSize` | 数字 | `50` | 每 tick 处理的区块数量（1-1000） |
+| `autoReloadInterval` | 数字（秒） | `3600` | 自动重载检查间隔 |
+| `batchSize` | 数字（1-1000） | `50` | 每 tick 处理的区块数量 |
 
 **示例**:
 ```
 /chunckreloader set enableAutoReload overworld true
 /chunckreloader set staleDays overworld 14
 /chunckreloader set staleDays the_end 30
-/chunckreloader set nonRecordArea overworld -1000,-1000,1000,1000
+/chunckreloader set batchSize 200
 /chunckreloader set protectArea the_end 0,0,500,500
 /chunckreloader set autoReloadInterval 600
 ```
 
-> **注意**: 所有按世界配置的选项都需要指定世界名。世界名错误会提示 `Wrong world name`。
+> **注意**: 所有按世界配置的选项都需要指定世界名，支持 Tab 补全。
 
 ### `/chunckreloader first <世界>`
 
@@ -126,11 +139,11 @@
 1. 扫描世界目录下所有 `r.*.mca` 区域文件
 2. 解析每个文件的头部信息，找出所有已存在的区块
 3. 跳过保护区域内的区块（OPAC / 配置 protectArea）
-4. 将未保护的区块排队清除（每 tick 50 个）
+4. 将未保护的区块排队清除并自动压缩 MCA 文件（释放硬盘空间）
 5. 玩家下次靠近时，游戏自动重新生成地形
 
 > **注意**: 此命令不会跳过玩家更新检测——它会删除所有能找到的未保护区区块。
-> 如果要删除大量区块，请确保服务器配置了适当的自动重载间隔，避免瞬间加载所有区块导致卡顿。
+> 完成后自动压缩 MCA 文件，显示世界 MCA 文件总大小变化。
 
 **示例**:
 ```
@@ -166,6 +179,7 @@ the_end:
   Non-Record Area: -50000,-50000,50000,50000
   Protect Area: -50000,-50000,50000,50000
 Check Interval: 3600s
+Batch Size: 50 chunks/tick
 ```
 有重载进行中时额外显示:
 ```
@@ -180,26 +194,27 @@ Failed: 100
 ### 工作原理
 
 1. 玩家加载区块时，模组自动追踪该区块的加载信息（用于 `all` 命令和自动重载）
-2. 通过 Minecraft 的 `ChunkStorage.write(ChunkPos, CompoundTag)` API 将区块数据写入空的 NBT 并标记状态为 `minecraft:empty`（同时更新文件磁盘和内存缓存，确保区块真正被清除）
-3. 从内存中卸载该区块并阻止旧数据回写
+2. 清除区块时通过 `ChunkStorage.write(ChunkPos, CompoundTag)` API 写入空 NBT，状态设为 `minecraft:empty`
+3. 重载完成后自动压缩 MCA 文件：通过 `RegionFileStorage.write(ChunkPos, null)` 清零非保护区块的头部，并将保护区块重写入紧凑版 MCA 文件
 4. 当玩家下次靠近时，游戏检测到区块状态为 empty，自动重新生成地形
 
-> **技术说明**: 旧版本使用 RandomAccessFile 直接修改 MCA 文件头部，但 Minecraft 的 RegionFile 会缓存头部信息在内存中，导致磁盘修改不生效。v1.1.0+ 改用 ChunkStorage API（ChunkMap extends ChunkStorage），该 API 会正确同步更新磁盘文件和内存缓存。
-> v2.0.0 还修复了动物堆积问题——使用 `EntityPersistentStorage.storeEntities()` API 正确清除实体数据（同理，直接修改实体 MCA 文件也有 RegionFile 缓存问题）。
+> **技术说明**: 清除区块必须通过 Minecraft 的正规 API（ChunkStorage / RegionFileStorage），否则 RegionFile 的内存缓存与磁盘文件不一致。v3.0.0 新增的 MCA 自动压缩功能通过 `RegionFile.clear()` 同步更新缓存和磁盘，并重建 MCA 文件释放硬盘空间。
+> 每 tick 处理的区块数可通过 `/chunckreloader set batchSize <数量>` 自定义。
 
 ### 防卡顿机制
 
 所有重载操作（包括手动命令和自动重载）均采用**分批处理**：
-- 每 tick 最多处理 50 个区块
+- 每 tick 处理的区块数可通过 `batchSize` 配置（默认 50）
 - 大范围重载会在后台逐步完成，不会导致服务器"时间静止"
 - 每处理完 25% 会向所有 OP 玩家发送进度提示
+- 完成后自动压缩 MCA 文件并显示世界总大小变化
 
 **进度提示示例**:
 ```
 [ChunkReloader] ■■■■■■■□□□ 50% (5000/10000 ↑4200 ↓700 ✗100)
 ```
 ```
-[ChunkReloader] Reload complete! 4200 regenerated, 700 skipped, 100 failed (10000 chunks, 45s)
+[ChunkReloader] Reload complete! 4200 regenerated, 700 skipped, 100 failed (10000 chunks, 45s) (30.0MB → 17.7MB, -41%)
 ```
 
 也可以使用 `/chunckreloader status` 查看更详细的实时进度。
@@ -235,6 +250,9 @@ Failed: 100
     
     # 自动重载检查间隔（秒），0 = 每个游戏刻检查
     autoReloadInterval = 3600
+    
+    # 每 tick 处理的区块数量（1-1000）
+    batchSize = 50
 ```
 
 ### 配置项说明
@@ -246,6 +264,7 @@ Failed: 100
 | `staleDays` | `overworld:14` | 区块超过 14 天未加载将被重载（按世界） |
 | `protectArea` | `overworld:-50000,-50000,50000,50000` | 保护区域（与非记录区域默认相同） |
 | `autoReloadInterval` | `3600` | 每 3600 秒（1 小时）检查一次过期区块 |
+| `batchSize` | `50` | 每 tick 处理 50 个区块（越大越快，但越卡） |
 
 ## 保护区
 
