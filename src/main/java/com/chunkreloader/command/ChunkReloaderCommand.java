@@ -637,6 +637,7 @@ public class ChunkReloaderCommand {
         }
 
         source.sendSuccess(() -> Component.literal("§eCheck Interval: §f" + config.autoReloadInterval.get() + "s"), false);
+        source.sendSuccess(() -> Component.literal("§eBatch Size: §f" + config.batchSize.get() + " chunks/tick"), false);
 
         // Show reload queue progress if active
         if (ReloadQueue.isActive()) {

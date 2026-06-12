@@ -158,9 +158,9 @@ public class ReloadQueue {
             ChunkRegenerator.flushEntityData(targetLevel);
             long[] sizeInfo = ChunkRegenerator.compactAffectedRegions(targetLevel);
             if (sizeInfo[2] > 0) {
-                long before = sizeInfo[0], after = sizeInfo[1];
-                int pct = (int) (after * 100 / before);
-                sizeMsg = " §7(" + formatBytes(before) + " §8→§7 " + formatBytes(after) + ", " + pct + "%)";
+                long before = sizeInfo[0], after = sizeInfo[1], saved = sizeInfo[2];
+                int pct = before > 0 ? (int) (saved * 100 / before) : 0;
+                sizeMsg = " §7(" + formatBytes(before) + " §8→§7 " + formatBytes(after) + ", -" + pct + "%)";
             }
         }
 
@@ -218,12 +218,13 @@ public class ReloadQueue {
         targetLevel = null;
     }
 
+    public static int getProgress() { return totalQueued > 0 ? processed * 100 / totalQueued : 0; }
+
     private static String formatBytes(long bytes) {
         if (bytes < 1024) return bytes + "B";
         if (bytes < 1024 * 1024) return String.format("%.1fKB", bytes / 1024.0);
         return String.format("%.1fMB", bytes / (1024.0 * 1024.0));
     }
-    public static int getProgress() { return totalQueued > 0 ? processed * 100 / totalQueued : 0; }
     public static int getTotalQueued() { return totalQueued; }
     public static int getProcessed() { return processed; }
     public static long getRegenCount() { return regenCount; }

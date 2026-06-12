@@ -20,7 +20,7 @@
 ## 安装
 
 1. 安装 **NeoForge 21.1+**（对应 Minecraft 1.21.1）
-2. 将 `chunkreloader-2.0.4.jar` 放入 `.minecraft/mods/` 文件夹（客户端）或服务端 `mods/` 文件夹
+2. 将 `chunkreloader-3.0.0.jar` 放入 `.minecraft/mods/` 文件夹（客户端）或服务端 `mods/` 文件夹
 3. 启动游戏/服务端
 
 ## 命令
@@ -286,4 +286,4 @@ Failed: 100
 ./gradlew build
 ```
 
-构建产物位于 `build/libs/chunkreloader-2.0.4.jar`
+构建产物位于 `build/libs/chunkreloader-3.0.0.jar`
