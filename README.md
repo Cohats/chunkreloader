@@ -20,7 +20,7 @@
 ## 安装
 
 1. 安装 **NeoForge 21.1+**（对应 Minecraft 1.21.1）
-2. 将 `chunkreloader-2.0.3.jar` 放入 `.minecraft/mods/` 文件夹（客户端）或服务端 `mods/` 文件夹
+2. 将 `chunkreloader-2.0.4.jar` 放入 `.minecraft/mods/` 文件夹（客户端）或服务端 `mods/` 文件夹
 3. 启动游戏/服务端
 
 ## 命令
@@ -100,6 +100,7 @@
 | `nonRecordArea` | `<世界> <x1,z1,x2,z2>` | `overworld -50000,-50000,50000,50000` | 非记录区域（按世界，方块坐标） |
 | `protectArea` | `<世界> <x1,z1,x2,z2>` | `overworld -50000,-50000,50000,50000` | 保护区域（按世界，方块坐标） |
 | `autoReloadInterval` | 数字 | `3600` | 自动重载检查间隔（秒） |
+| `batchSize` | 数字 | `50` | 每 tick 处理的区块数量（1-1000） |
 
 **示例**:
 ```
@@ -285,4 +286,4 @@ Failed: 100
 ./gradlew build
 ```
 
-构建产物位于 `build/libs/chunkreloader-2.0.3.jar`
+构建产物位于 `build/libs/chunkreloader-2.0.4.jar`

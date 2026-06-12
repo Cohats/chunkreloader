@@ -75,7 +75,8 @@ public class ReloadQueue {
     public static void tick() {
         if (!active || targetLevel == null) return;
 
-        int batchSize = Math.min(50, QUEUE.size());
+        int maxBatch = com.chunkreloader.config.Config.getInstance().batchSize.get();
+        int batchSize = Math.min(maxBatch, QUEUE.size());
         if (batchSize == 0) {
             finish();
             return;
@@ -151,14 +152,21 @@ public class ReloadQueue {
         active = false;
         long elapsed = (System.currentTimeMillis() - startTime) / 1000;
 
-        // Flush entity data to persist removed entities
+        // Flush entity data, compact MCA files to free disk space
+        String sizeMsg = "";
         if (targetLevel != null) {
             ChunkRegenerator.flushEntityData(targetLevel);
+            long[] sizeInfo = ChunkRegenerator.compactAffectedRegions(targetLevel);
+            if (sizeInfo[2] > 0) {
+                long before = sizeInfo[0], after = sizeInfo[1];
+                int pct = (int) (after * 100 / before);
+                sizeMsg = " §7(" + formatBytes(before) + " §8→§7 " + formatBytes(after) + ", " + pct + "%)";
+            }
         }
 
         ChunkReloaderMod.LOGGER.info(
-                "Reload complete: {} regenerated, {} skipped, {} failed (total: {}, {}s)",
-                regenCount, skipCount, failCount, totalQueued, elapsed
+                "Reload complete: {} regenerated, {} skipped, {} failed (total: {}, {}s){}",
+                regenCount, skipCount, failCount, totalQueued, elapsed, sizeMsg
         );
 
         // Send completion message to all OP players
@@ -167,6 +175,7 @@ public class ReloadQueue {
                     "§a[ChunkReloader] §2Reload complete! §a" + regenCount + "§2 regenerated, §7" + skipCount
                     + "§2 skipped, §c" + failCount + "§2 failed"
                     + " §7(" + totalQueued + " chunks, " + elapsed + "s)"
+                    + sizeMsg
             );
             for (ServerPlayer player : targetLevel.getServer().getPlayerList().getPlayers()) {
                 if (player.hasPermissions(2)) {
@@ -179,6 +188,41 @@ public class ReloadQueue {
     }
 
     public static boolean isActive() { return active; }
+
+    /**
+     * Cancel the current reload operation immediately.
+     */
+    public static synchronized void stop() {
+        if (!active) return;
+        active = false;
+        int remaining = QUEUE.size();
+        QUEUE.clear();
+        long elapsed = (System.currentTimeMillis() - startTime) / 1000;
+
+        if (targetLevel != null && targetLevel.getServer() != null) {
+            Component msg = Component.literal(
+                    "§c[ChunkReloader] §4Reload cancelled! §c" + processed + "§4 processed, §c" + remaining + "§4 remaining"
+                    + " §7(" + elapsed + "s)"
+            );
+            for (ServerPlayer player : targetLevel.getServer().getPlayerList().getPlayers()) {
+                if (player.hasPermissions(2)) {
+                    player.sendSystemMessage(msg);
+                }
+            }
+        }
+
+        ChunkReloaderMod.LOGGER.info(
+                "Reload cancelled: {} processed, {} remaining ({}s)",
+                processed, remaining, elapsed
+        );
+        targetLevel = null;
+    }
+
+    private static String formatBytes(long bytes) {
+        if (bytes < 1024) return bytes + "B";
+        if (bytes < 1024 * 1024) return String.format("%.1fKB", bytes / 1024.0);
+        return String.format("%.1fMB", bytes / (1024.0 * 1024.0));
+    }
     public static int getProgress() { return totalQueued > 0 ? processed * 100 / totalQueued : 0; }
     public static int getTotalQueued() { return totalQueued; }
     public static int getProcessed() { return processed; }

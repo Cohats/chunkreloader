@@ -168,6 +168,19 @@ public class ChunkReloaderCommand {
                                 ))
                         )
                 )
+                .then(Commands.literal("batchSize")
+                        .then(Commands.argument("count", IntegerArgumentType.integer(1, 1000))
+                                .executes(ctx -> setBatchSize(
+                                        ctx.getSource(),
+                                        IntegerArgumentType.getInteger(ctx, "count")
+                                ))
+                        )
+                )
+        );
+
+        // --- stop subcommand: cancel current reload ---
+        root.then(Commands.literal("stop")
+                .executes(ctx -> cancelReload(ctx.getSource()))
         );
 
         // --- first subcommand: factory reset — delete ALL unprotected chunks ---
@@ -402,6 +415,23 @@ public class ChunkReloaderCommand {
         Config.getInstance().autoReloadInterval.set(seconds);
         source.sendSuccess(() -> Component.literal("§a[ChunkReloader] autoReloadInterval set to §e" + seconds + "§a seconds"), true);
         saveConfig();
+        return 1;
+    }
+
+    private static int setBatchSize(CommandSourceStack source, int count) {
+        Config.getInstance().batchSize.set(count);
+        source.sendSuccess(() -> Component.literal("§a[ChunkReloader] batchSize set to §e" + count + "§a chunks per tick"), true);
+        saveConfig();
+        return 1;
+    }
+
+    private static int cancelReload(CommandSourceStack source) {
+        if (!ReloadQueue.isActive()) {
+            source.sendFailure(Component.literal("§cNo reload is currently in progress."));
+            return 0;
+        }
+        ReloadQueue.stop();
+        source.sendSuccess(() -> Component.literal("§a[ChunkReloader] Reload cancelled."), true);
         return 1;
     }
 

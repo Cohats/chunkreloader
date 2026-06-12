@@ -29,6 +29,8 @@ public class Config {
 
     public final ModConfigSpec.IntValue autoReloadInterval;
 
+    public final ModConfigSpec.IntValue batchSize;
+
     // ---- Cache for parsed per-world values ----
     private final Map<String, Map<String, String>> parsedCache = new HashMap<>();
 
@@ -54,6 +56,10 @@ public class Config {
         autoReloadInterval = builder
                 .comment("Interval in seconds between auto-reload checks (0 = every server tick)")
                 .defineInRange("autoReloadInterval", 3600, 0, 86400);
+
+        batchSize = builder
+                .comment("Number of chunks to process per tick during reload (default: 50)")
+                .defineInRange("batchSize", 50, 1, 1000);
 
         builder.pop();
     }
