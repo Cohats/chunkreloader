@@ -90,13 +90,81 @@ public class ChunkReloaderCommand {
         root.then(Commands.literal("reload").then(reloadWorldArg));
 
         // --- set subcommand ---
+        var worldSuggests = (com.mojang.brigadier.suggestion.SuggestionProvider<CommandSourceStack>) (ctx, builder) -> {
+            var server = ctx.getSource().getServer();
+            for (var key : server.levelKeys()) {
+                builder.suggest(key.location().getPath());
+            }
+            return builder.buildFuture();
+        };
+
         root.then(Commands.literal("set")
-                .then(Commands.argument("option", StringArgumentType.word())
-                        .then(Commands.argument("args", StringArgumentType.greedyString())
-                                .executes(ctx -> setConfig(
+                .then(Commands.literal("enableAutoReload")
+                        .then(Commands.argument("world", StringArgumentType.word())
+                                .suggests(worldSuggests)
+                                .then(Commands.argument("value", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> {
+                                            builder.suggest("true");
+                                            builder.suggest("false");
+                                            return builder.buildFuture();
+                                        })
+                                        .executes(ctx -> setAutoReload(
+                                                ctx.getSource(),
+                                                StringArgumentType.getString(ctx, "world"),
+                                                StringArgumentType.getString(ctx, "value")
+                                        ))
+                                )
+                        )
+                )
+                .then(Commands.literal("staleDays")
+                        .then(Commands.argument("world", StringArgumentType.word())
+                                .suggests(worldSuggests)
+                                .then(Commands.argument("days", IntegerArgumentType.integer(1))
+                                        .executes(ctx -> setStaleDays(
+                                                ctx.getSource(),
+                                                StringArgumentType.getString(ctx, "world"),
+                                                IntegerArgumentType.getInteger(ctx, "days")
+                                        ))
+                                )
+                        )
+                )
+                .then(Commands.literal("nonRecordArea")
+                        .then(Commands.argument("world", StringArgumentType.word())
+                                .suggests(worldSuggests)
+                                .then(Commands.argument("coords", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> {
+                                            builder.suggest("-50000,-50000,50000,50000");
+                                            return builder.buildFuture();
+                                        })
+                                        .executes(ctx -> setNonRecordArea(
+                                                ctx.getSource(),
+                                                StringArgumentType.getString(ctx, "world"),
+                                                StringArgumentType.getString(ctx, "coords")
+                                        ))
+                                )
+                        )
+                )
+                .then(Commands.literal("protectArea")
+                        .then(Commands.argument("world", StringArgumentType.word())
+                                .suggests(worldSuggests)
+                                .then(Commands.argument("coords", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> {
+                                            builder.suggest("-50000,-50000,50000,50000");
+                                            return builder.buildFuture();
+                                        })
+                                        .executes(ctx -> setProtectArea(
+                                                ctx.getSource(),
+                                                StringArgumentType.getString(ctx, "world"),
+                                                StringArgumentType.getString(ctx, "coords")
+                                        ))
+                                )
+                        )
+                )
+                .then(Commands.literal("autoReloadInterval")
+                        .then(Commands.argument("seconds", IntegerArgumentType.integer(0))
+                                .executes(ctx -> setInterval(
                                         ctx.getSource(),
-                                        StringArgumentType.getString(ctx, "option"),
-                                        StringArgumentType.getString(ctx, "args")
+                                        IntegerArgumentType.getInteger(ctx, "seconds")
                                 ))
                         )
                 )
@@ -281,124 +349,60 @@ public class ChunkReloaderCommand {
         return (int) toReload.size();
     }
 
-    // ---- set ----
+    // ---- set helpers ----
 
-    private static int setConfig(CommandSourceStack source, String option, String args) {
-        var server = source.getServer();
-
-        try {
-            switch (option.toLowerCase()) {
-                case "enableautoreload":
-                case "enable_auto_reload": {
-                    var wv = parseWorldValue(server, args);
-                    if (wv == null) return 0;
-                    Config.getInstance().setAutoReload(wv.worldName, Boolean.parseBoolean(wv.value));
-                    source.sendSuccess(() -> Component.literal("§a[ChunkReloader] enableAutoReload set to §e" + wv.value + "§a for world §e" + wv.worldName), true);
-                    break;
-                }
-
-                case "staledays":
-                case "stale_days": {
-                    var wv = parseWorldValue(server, args);
-                    if (wv == null) return 0;
-                    int days = Integer.parseInt(wv.value);
-                    if (days < 1) {
-                        source.sendFailure(Component.literal("staleDays must be >= 1"));
-                        return 0;
-                    }
-                    Config.getInstance().setStaleDays(wv.worldName, days);
-                    source.sendSuccess(() -> Component.literal("§a[ChunkReloader] staleDays set to §e" + days + "§a days for world §e" + wv.worldName), true);
-                    break;
-                }
-
-                case "nonrecordarea":
-                case "non_record_area": {
-                    String areaStr = buildAreaString(server, args);
-                    if (areaStr == null) return 0;
-                    Config.getInstance().nonRecordArea.set(areaStr);
-                    source.sendSuccess(() -> Component.literal("§a[ChunkReloader] nonRecordArea set to §e" + areaStr), true);
-                    break;
-                }
-
-                case "protectarea":
-                case "protect_area": {
-                    String areaStr = buildAreaString(server, args);
-                    if (areaStr == null) return 0;
-                    Config.getInstance().protectArea.set(areaStr);
-                    source.sendSuccess(() -> Component.literal("§a[ChunkReloader] protectArea set to §e" + areaStr), true);
-                    break;
-                }
-
-                case "autoreloadinterval":
-                case "auto_reload_interval":
-                    int interval = Integer.parseInt(args);
-                    if (interval < 0) {
-                        source.sendFailure(Component.literal("autoReloadInterval must be >= 0"));
-                        return 0;
-                    }
-                    if (interval > 0 && interval < 60) {
-                        source.sendSuccess(() -> Component.literal("§e[ChunkReloader] Warning: interval < 60s may cause lag"), true);
-                    }
-                    Config.getInstance().autoReloadInterval.set(interval);
-                    source.sendSuccess(() -> Component.literal("§a[ChunkReloader] autoReloadInterval set to §e" + interval + "§a seconds"), true);
-                    break;
-
-                default:
-                    source.sendFailure(Component.literal("§cUnknown option: " + option
-                            + ". Available: enableAutoReload, staleDays, nonRecordArea, protectArea, autoReloadInterval"));
-                    return 0;
-            }
-
-            saveConfig();
-            return 1;
-
-        } catch (NumberFormatException e) {
-            source.sendFailure(Component.literal("§cInvalid number format: " + args));
-            return 0;
-        } catch (IllegalArgumentException e) {
-            source.sendFailure(Component.literal("§c" + e.getMessage()));
+    private static int setAutoReload(CommandSourceStack source, String world, String value) {
+        if (!AreaParser.isValidWorld(source.getServer(), world)) {
+            source.sendFailure(Component.literal("§cWrong world name: " + world));
             return 0;
         }
+        Config.getInstance().setAutoReload(world, Boolean.parseBoolean(value));
+        source.sendSuccess(() -> Component.literal("§a[ChunkReloader] enableAutoReload set to §e" + value + "§a for world §e" + world), true);
+        saveConfig();
+        return 1;
     }
 
-    private static record WorldValue(String worldName, String value) {}
-
-    private static WorldValue parseWorldValue(net.minecraft.server.MinecraftServer server, String args) {
-        String[] parts = args.split(" ", 2);
-        if (parts.length < 2) {
-            throw new IllegalArgumentException("Format: <world> <value>. Use /chunckreloader get worldName to list worlds.");
+    private static int setStaleDays(CommandSourceStack source, String world, int days) {
+        if (!AreaParser.isValidWorld(source.getServer(), world)) {
+            source.sendFailure(Component.literal("§cWrong world name: " + world));
+            return 0;
         }
-        String worldName = parts[0].trim();
-        String value = parts[1].trim();
-
-        if (!AreaParser.isValidWorld(server, worldName)) {
-            throw new IllegalArgumentException("Wrong world name: " + worldName + ". Use /chunckreloader get worldName to list valid worlds.");
-        }
-        return new WorldValue(worldName, value);
+        Config.getInstance().setStaleDays(world, days);
+        source.sendSuccess(() -> Component.literal("§a[ChunkReloader] staleDays set to §e" + days + "§a days for world §e" + world), true);
+        saveConfig();
+        return 1;
     }
 
-    private static String buildAreaString(net.minecraft.server.MinecraftServer server, String args) {
-        String[] parts = args.split(" ", 2);
-        if (parts.length < 2) {
-            throw new IllegalArgumentException("Format: <world> <x1,z1,x2,z2>. Use /chunckreloader get worldName to list worlds.");
+    private static int setNonRecordArea(CommandSourceStack source, String world, String coords) {
+        if (!AreaParser.isValidWorld(source.getServer(), world)) {
+            source.sendFailure(Component.literal("§cWrong world name: " + world));
+            return 0;
         }
+        Config.getInstance().setNonRecordArea(world, coords);
+        source.sendSuccess(() -> Component.literal("§a[ChunkReloader] nonRecordArea set to §e" + coords + "§a for world §e" + world), true);
+        saveConfig();
+        return 1;
+    }
 
-        String worldName = parts[0].trim();
-        String coords = parts[1].trim();
-
-        if (!AreaParser.isValidWorld(server, worldName)) {
-            throw new IllegalArgumentException("Wrong world name: " + worldName + ". Use /chunckreloader get worldName to list valid worlds.");
+    private static int setProtectArea(CommandSourceStack source, String world, String coords) {
+        if (!AreaParser.isValidWorld(source.getServer(), world)) {
+            source.sendFailure(Component.literal("§cWrong world name: " + world));
+            return 0;
         }
+        Config.getInstance().setProtectArea(world, coords);
+        source.sendSuccess(() -> Component.literal("§a[ChunkReloader] protectArea set to §e" + coords + "§a for world §e" + world), true);
+        saveConfig();
+        return 1;
+    }
 
-        String[] coordParts = coords.replace(":", ",").split(",");
-        if (coordParts.length != 4) {
-            throw new IllegalArgumentException("Invalid coordinates. Format: x1,z1,x2,z2");
+    private static int setInterval(CommandSourceStack source, int seconds) {
+        if (seconds > 0 && seconds < 60) {
+            source.sendSuccess(() -> Component.literal("§e[ChunkReloader] Warning: interval < 60s may cause lag"), false);
         }
-        for (String p : coordParts) {
-            Integer.parseInt(p.trim());
-        }
-
-        return worldName + ":" + coords.replace(" ", "");
+        Config.getInstance().autoReloadInterval.set(seconds);
+        source.sendSuccess(() -> Component.literal("§a[ChunkReloader] autoReloadInterval set to §e" + seconds + "§a seconds"), true);
+        saveConfig();
+        return 1;
     }
 
     private static void saveConfig() {

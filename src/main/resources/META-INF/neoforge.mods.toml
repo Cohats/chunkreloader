@@ -5,7 +5,7 @@ issueTrackerURL=""
 
 [[mods]]
 modId="chunkreloader"
-version="2.0.2"
+version="2.0.3"
 displayName="ChunkReloader"
 logoFile="chunkreloader.png"
 credits=""
