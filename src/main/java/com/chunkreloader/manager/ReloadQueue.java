@@ -30,6 +30,14 @@ public class ReloadQueue {
      * Returns false if a batch is already in progress.
      */
     public static synchronized boolean startBatch(ServerLevel level, List<ChunkPos> chunks, boolean force) {
+        return startBatch(level, chunks, force, null);
+    }
+
+    /**
+     * Start a batch reload with a custom start message to OP players.
+     * If label is null, a default message is generated.
+     */
+    public static synchronized boolean startBatch(ServerLevel level, List<ChunkPos> chunks, boolean force, String label) {
         if (active) return false;
 
         QUEUE.clear();
@@ -47,10 +55,10 @@ public class ReloadQueue {
 
         // Send start message to all OP players
         if (level.getServer() != null) {
-            Component msg = Component.literal(
-                    "§6[ChunkReloader] §eStarting reload of §6" + totalQueued + "§e chunks"
-                    + (force ? " §c(force mode)" : "") + "..."
-            );
+            String msgText = (label != null) ? label
+                    : "§6[ChunkReloader] §eStarting reload of §6" + totalQueued + "§e chunks"
+                    + (force ? " §c(force mode)" : "") + "...";
+            Component msg = Component.literal(msgText);
             for (ServerPlayer player : level.getServer().getPlayerList().getPlayers()) {
                 if (player.hasPermissions(2)) {
                     player.sendSystemMessage(msg);

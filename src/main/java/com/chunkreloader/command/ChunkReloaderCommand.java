@@ -442,21 +442,24 @@ public class ChunkReloaderCommand {
 
         source.sendSuccess(() -> Component.literal("§e[ChunkReloader] Found §6" + allChunks.size() + "§e chunks total. Filtering protected areas..."), false);
 
-        // Filter out protected chunks
+        // Filter out protected chunks (OPAC + config protectArea)
         List<ChunkPos> toDelete = new ArrayList<>();
         for (ChunkPos pos : allChunks) {
             if (ProtectedChunkManager.isProtected(level, pos)) continue;
             toDelete.add(pos);
         }
 
-        source.sendSuccess(() -> Component.literal("§e[ChunkReloader] Queuing §c" + toDelete.size() + "§e unprotected chunks for deletion..."), false);
+        int deleteCount = toDelete.size();
+        source.sendSuccess(() -> Component.literal("§e[ChunkReloader] Queuing §c" + deleteCount + "§e unprotected chunks for deletion..."), false);
 
         if (toDelete.isEmpty()) {
             source.sendSuccess(() -> Component.literal("§a[ChunkReloader] All chunks are protected. Nothing to delete."), false);
             return 1;
         }
 
-        boolean started = ReloadQueue.startBatch(level, toDelete, true);
+        boolean started = ReloadQueue.startBatch(level, toDelete, true,
+                "§c[ChunkReloader] §4Factory reset: §c" + toDelete.size() + "§4 unprotected chunks queued..."
+        );
         if (!started) {
             source.sendFailure(Component.literal("§cFailed to start. Another reload may be in progress."));
             return 0;
